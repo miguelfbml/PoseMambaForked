@@ -87,6 +87,11 @@ def get_pose2D(video_path, output_dir):
 
     print('\nGenerating 2D pose...')
     keypoints, scores = hrnet_pose(video_path, det_dim=416, num_peroson=1, gen_output=True)
+    if keypoints.size == 0 or scores.size == 0 or keypoints.shape[1] == 0:
+        raise RuntimeError(
+            "No valid pose frames were extracted from the input video. "
+            "This usually means frame decoding failed (codec issue) or no person was detected in any frame."
+        )
     keypoints, scores, valid_frames = h36m_coco_format(keypoints, scores)
     
     # Add conf score to the last dim

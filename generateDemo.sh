@@ -9,4 +9,4 @@
 echo "Starting demo generation for PoseMamba"
 
 
-python vis.py --video tj.mp4 --gpu 0
+python vis.py --video tj_cut.mp4 --gpu 0

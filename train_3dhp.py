@@ -43,8 +43,10 @@ from lib.model.loss import (
 import logger
 from logger import colorlogger
 
-# MPI-INF-3DHP dataset loader (lives inside MotionAGFormer)
-from data.reader.motion_dataset import MPI3DHP
+# MPI-INF-3DHP dataset loader (lives inside MotionAGFormer).
+# Use explicit package import to avoid conflicts with the top-level `data/`
+# directory in this repository.
+from MotionAGFormer.data.reader.motion_dataset import MPI3DHP
 
 # ---------------------------------------------------------------------------
 # MPI-INF-3DHP joint symmetry for horizontal-flip augmentation.

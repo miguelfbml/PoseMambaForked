@@ -6,31 +6,32 @@
 #   data_test_3dhp.npz
 # (Follow MotionAGFormer/data/preprocess/ to generate these from the raw 3DHP dataset)
 
-# General
+# General  
+train_2d: False
 no_eval: False
-finetune: False
+finetune: False 
 partial_train: null
 
-# Training
-epochs: 90
-checkpoint_frequency: 10
-batch_size: 16
+# Traning 
+epochs: 120
+checkpoint_frequency: 30
+batch_size: 4  
 dropout: 0.0
-learning_rate: 0.0005
+learning_rate: 0.0002
 weight_decay: 0.01
 lr_decay: 0.99
 
 # Model  (must match PoseMamba-B architecture in lib/model/PoseMamba.py)
 backbone: "PoseMamba"
-maxlen: 81       # temporal dimension – must equal n_frames
+maxlen: 27       # temporal dimension – must equal n_frames
 dim_feat: 128
 mlp_ratio: 2
 depth: 10
 
 # Data
 data_root: data/motion3d/
-n_frames: 81     # sequence length fed to the model
-stride: 9        # stride for chunking training sequences
+n_frames: 27     # sequence length fed to the model
+stride: 3        # stride for chunking training sequences
 no_conf: True    # remove confidence channel (input is x,y only, matching in_chans=2)
 flip: True       # horizontal-flip augmentation during training
 

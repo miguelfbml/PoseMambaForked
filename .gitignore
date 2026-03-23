@@ -1,6 +1,6 @@
-data/
-checkpoint/
-eval/
+/data/
+/checkpoint/
+/eval/
 
 __pycache__/
 **/__pycache__/
@@ -11,5 +11,5 @@ build/
 dist/
 
 zdemo/
-demo/
+/demo/
 

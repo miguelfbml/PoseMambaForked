@@ -31,7 +31,7 @@ depth: 10
 # Data
 data_root: data/motion3d/
 n_frames: 81     # sequence length fed to the model
-stride: 3        # stride for chunking training sequences
+stride: 27        # stride for chunking training sequences
 no_conf: True    # remove confidence channel (input is x,y only, matching in_chans=2)
 flip: True       # horizontal-flip augmentation during training
 

@@ -134,6 +134,117 @@ def flip_data_3dhp(data):
     return flipped
 
 
+def compute_torso_diameter_3dhp(gt_root_rel_mm):
+    """
+    Compute torso diameter per frame from root-relative 3D joints.
+
+    Uses the distance between shoulder and hip midpoints:
+      shoulder_mid = (right_shoulder + left_shoulder) / 2
+      hip_mid      = (right_hip + left_hip) / 2
+
+    Args:
+        gt_root_rel_mm: torch.Tensor of shape (T, J, 3) in millimetres.
+
+    Returns:
+        torch.Tensor of shape (T,) with torso diameter in millimetres.
+    """
+    right_shoulder = gt_root_rel_mm[:, 2, :]
+    left_shoulder = gt_root_rel_mm[:, 5, :]
+    right_hip = gt_root_rel_mm[:, 8, :]
+    left_hip = gt_root_rel_mm[:, 11, :]
+
+    shoulder_mid = (right_shoulder + left_shoulder) / 2.0
+    hip_mid = (right_hip + left_hip) / 2.0
+    return torch.norm(shoulder_mid - hip_mid, dim=-1)
+
+
+def compute_pck_metrics_3dhp(joint_errors_mm, torso_diameters_mm):
+    """
+    Compute PCK metrics from joint errors on valid 3DHP frames.
+
+    Args:
+        joint_errors_mm: torch.Tensor of shape (T_valid, J) with per-joint errors in mm.
+        torso_diameters_mm: torch.Tensor of shape (T_valid,) with torso diameters in mm.
+
+    Returns:
+        dict[str, float]: PCK metrics in [0, 1].
+    """
+    if joint_errors_mm.numel() == 0:
+        return {
+            'PCK@10%_torso': 0.0,
+            'PCK@20%_torso': 0.0,
+            'PCK@30%_torso': 0.0,
+            'PCK@100%_torso': 0.0,
+            'PCK@10%_150mm': 0.0,
+            'PCK@20%_150mm': 0.0,
+            'PCK@30%_150mm': 0.0,
+            'PCK@100%_150mm': 0.0,
+        }
+
+    torso_thresholds = {
+        'PCK@10%_torso': 0.10,
+        'PCK@20%_torso': 0.20,
+        'PCK@30%_torso': 0.30,
+        'PCK@100%_torso': 1.00,
+    }
+
+    fixed_thresholds = {
+        'PCK@10%_150mm': 15.0,
+        'PCK@20%_150mm': 30.0,
+        'PCK@30%_150mm': 45.0,
+        'PCK@100%_150mm': 150.0,
+    }
+
+    metrics = {}
+    for key, ratio in torso_thresholds.items():
+        thr = torso_diameters_mm.unsqueeze(-1) * ratio
+        metrics[key] = (joint_errors_mm <= thr).float().mean().item()
+
+    for key, thr_mm in fixed_thresholds.items():
+        metrics[key] = (joint_errors_mm <= thr_mm).float().mean().item()
+
+    return metrics
+
+
+def compute_auc_3dhp(joint_errors_mm, max_threshold_mm=150.0, step_mm=5.0):
+    """
+    Compute AUC of the PCK curve in [0, max_threshold_mm].
+
+    Args:
+        joint_errors_mm: torch.Tensor of shape (N, J) or (N,) in mm.
+        max_threshold_mm: maximum threshold in mm for integration.
+        step_mm: threshold step in mm.
+
+    Returns:
+        float: normalised AUC in [0, 1].
+    """
+    if joint_errors_mm.numel() == 0:
+        return 0.0
+
+    thresholds = torch.arange(
+        0.0,
+        max_threshold_mm + step_mm,
+        step_mm,
+        device=joint_errors_mm.device,
+        dtype=joint_errors_mm.dtype,
+    )
+    pck_curve = torch.stack([(joint_errors_mm <= thr).float().mean() for thr in thresholds])
+    auc = torch.trapz(pck_curve, thresholds) / max_threshold_mm
+    return auc.item()
+
+
+def timed_model_forward(model_pos, pose_2d):
+    """Run one model forward pass and return output plus elapsed time in ms."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    t0 = time.perf_counter()
+    output = model_pos(pose_2d)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    return output, elapsed_ms
+
+
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -159,6 +270,11 @@ def evaluate(args, model_pos, test_loader):
 
     total_error = 0.0
     total_valid_frames = 0
+    all_valid_joint_errors = []
+    all_valid_torso_diameters = []
+    inference_call_times_ms = []
+    inference_sample_times_ms = []
+    inference_frame_times_ms = []
 
     with torch.no_grad():
         for batch in tqdm(test_loader):
@@ -171,8 +287,14 @@ def evaluate(args, model_pos, test_loader):
 
             if args.flip:
                 pose_2d_flip = flip_data_3dhp(pose_2d)
-                pred_1    = model_pos(pose_2d)
-                pred_flip = model_pos(pose_2d_flip)
+                pred_1, t1_ms = timed_model_forward(model_pos, pose_2d)
+                pred_flip, t2_ms = timed_model_forward(model_pos, pose_2d_flip)
+                total_ms = t1_ms + t2_ms
+                inference_call_times_ms.extend([t1_ms, t2_ms])
+                # Two forward calls are used to build one prediction batch when flip-test is on.
+                inference_sample_times_ms.append(total_ms / max(N, 1))
+                T = pose_2d.shape[1]
+                inference_frame_times_ms.append(total_ms / max(N * T, 1))
                 # Undo the flip on the predictions
                 pred_flip[..., 0] *= -1
                 lf = pred_flip[..., JOINTS_LEFT_3DHP,  :].clone()
@@ -181,7 +303,11 @@ def evaluate(args, model_pos, test_loader):
                 pred_flip[..., JOINTS_RIGHT_3DHP, :] = lf
                 predicted_3d_pos = (pred_1 + pred_flip) / 2.0
             else:
-                predicted_3d_pos = model_pos(pose_2d)   # (N, T, J, 3)
+                predicted_3d_pos, t_ms = timed_model_forward(model_pos, pose_2d)   # (N, T, J, 3)
+                inference_call_times_ms.append(t_ms)
+                inference_sample_times_ms.append(t_ms / max(N, 1))
+                T = pose_2d.shape[1]
+                inference_frame_times_ms.append(t_ms / max(N * T, 1))
 
             # Make root-relative at joint 14 (pelvis in 3DHP)
             predicted_3d_pos = predicted_3d_pos - predicted_3d_pos[:, :, 14:15, :]
@@ -203,8 +329,14 @@ def evaluate(args, model_pos, test_loader):
                 if pred_valid.shape[0] == 0:
                     continue
 
+                # Per-joint errors used for PCK/AUC.
+                joint_errors = torch.norm(pred_valid - gt_valid, dim=-1)  # (T_valid, J)
+                torso_diameters = compute_torso_diameter_3dhp(gt_valid)    # (T_valid,)
+                all_valid_joint_errors.append(joint_errors)
+                all_valid_torso_diameters.append(torso_diameters)
+
                 # Per-frame MPJPE averaged over joints, then summed over frames
-                per_frame = torch.norm(pred_valid - gt_valid, dim=-1).mean(dim=-1)  # (T_valid,)
+                per_frame = joint_errors.mean(dim=-1)  # (T_valid,)
                 total_error        += per_frame.sum().item()
                 total_valid_frames += pred_valid.shape[0]
 
@@ -213,7 +345,43 @@ def evaluate(args, model_pos, test_loader):
         return float('inf')
 
     mpjpe_mm = total_error / total_valid_frames
+    joint_errors_all = torch.cat(all_valid_joint_errors, dim=0)
+    torso_diameters_all = torch.cat(all_valid_torso_diameters, dim=0)
+    pck_metrics = compute_pck_metrics_3dhp(joint_errors_all, torso_diameters_all)
+    auc = compute_auc_3dhp(joint_errors_all, max_threshold_mm=150.0, step_mm=5.0)
+
+    call_times = np.array(inference_call_times_ms, dtype=np.float64)
+    sample_times = np.array(inference_sample_times_ms, dtype=np.float64)
+    frame_times = np.array(inference_frame_times_ms, dtype=np.float64)
+
     log.info(f'Protocol #1 Error (MPJPE): {mpjpe_mm:.2f} mm')
+    if call_times.size > 0:
+        log.info(
+            'Inference time / forward call (ms): '
+            f'mean={call_times.mean():.3f}, p50={np.percentile(call_times, 50):.3f}, '
+            f'p95={np.percentile(call_times, 95):.3f}'
+        )
+    if sample_times.size > 0:
+        log.info(
+            'Inference time / sample (ms): '
+            f'mean={sample_times.mean():.3f}, p50={np.percentile(sample_times, 50):.3f}, '
+            f'p95={np.percentile(sample_times, 95):.3f}'
+        )
+    if frame_times.size > 0:
+        log.info(
+            'Inference time / frame (ms): '
+            f'mean={frame_times.mean():.4f}, p50={np.percentile(frame_times, 50):.4f}, '
+            f'p95={np.percentile(frame_times, 95):.4f}'
+        )
+    log.info(f'PCK@10%_torso: {pck_metrics["PCK@10%_torso"] * 100:.2f}%')
+    log.info(f'PCK@20%_torso: {pck_metrics["PCK@20%_torso"] * 100:.2f}%')
+    log.info(f'PCK@30%_torso: {pck_metrics["PCK@30%_torso"] * 100:.2f}%')
+    log.info(f'PCK@100%_torso: {pck_metrics["PCK@100%_torso"] * 100:.2f}%')
+    log.info(f'PCK@10%_150mm: {pck_metrics["PCK@10%_150mm"] * 100:.2f}%')
+    log.info(f'PCK@20%_150mm: {pck_metrics["PCK@20%_150mm"] * 100:.2f}%')
+    log.info(f'PCK@30%_150mm: {pck_metrics["PCK@30%_150mm"] * 100:.2f}%')
+    log.info(f'PCK@100%_150mm: {pck_metrics["PCK@100%_150mm"] * 100:.2f}%')
+    log.info(f'AUC@0-150mm: {auc:.4f}')
     return mpjpe_mm
 
 

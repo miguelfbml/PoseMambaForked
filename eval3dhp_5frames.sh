@@ -9,4 +9,4 @@
 echo "Starting eval job for PoseMamba on MPI-INF-3DHP (S, 5 frames)"
 
 
-python train_3dhp.py --config configs/pose3d/PoseMamba_train_3dhp_S_5.yaml --evaluate checkpoint/pose3d/PoseMamba_train_3dhp_S_5 --checkpoint eval/checkpoint_S_5
+python train_3dhp.py --config configs/pose3d/PoseMamba_train_3dhp_S_5.yaml --evaluate checkpoint/pose3d/PoseMamba_train_3dhp_S_5/best_epoch.bin --checkpoint eval/checkpoint_S_5

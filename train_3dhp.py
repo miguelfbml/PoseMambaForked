@@ -138,9 +138,10 @@ def compute_torso_diameter_3dhp(gt_root_rel_mm):
     """
     Compute torso diameter per frame from root-relative 3D joints.
 
-    Uses the distance between shoulder and hip midpoints:
-      shoulder_mid = (right_shoulder + left_shoulder) / 2
-      hip_mid      = (right_hip + left_hip) / 2
+        Uses the average of the two shoulder-hip diagonal distances:
+            d1 = ||left_shoulder  - right_hip||
+            d2 = ||right_shoulder - left_hip||
+            torso_diameter = (d1 + d2) / 2
 
     Args:
         gt_root_rel_mm: torch.Tensor of shape (T, J, 3) in millimetres.
@@ -153,9 +154,9 @@ def compute_torso_diameter_3dhp(gt_root_rel_mm):
     right_hip = gt_root_rel_mm[:, 8, :]
     left_hip = gt_root_rel_mm[:, 11, :]
 
-    shoulder_mid = (right_shoulder + left_shoulder) / 2.0
-    hip_mid = (right_hip + left_hip) / 2.0
-    return torch.norm(shoulder_mid - hip_mid, dim=-1)
+    diag_lr = torch.norm(left_shoulder - right_hip, dim=-1)
+    diag_rl = torch.norm(right_shoulder - left_hip, dim=-1)
+    return (diag_lr + diag_rl) / 2.0
 
 
 def compute_pck_metrics_3dhp(joint_errors_mm, torso_diameters_mm):

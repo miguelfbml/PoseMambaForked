@@ -1,0 +1,47 @@
+# PoseMamba-S training config for MPI-INF-3DHP (5-frame temporal window)
+# Use with: python train_3dhp.py --config configs/pose3d/PoseMamba_train_3dhp_S_5.yaml
+#
+# Data files required in data_root:
+#   data_train_3dhp.npz
+#   data_test_3dhp.npz
+# (Follow MotionAGFormer/data/preprocess/ to generate these from the raw 3DHP dataset)
+
+# General  
+train_2d: False
+no_eval: False
+finetune: False 
+partial_train: null
+
+# Traning 
+epochs: 120
+checkpoint_frequency: 30
+batch_size: 4  
+dropout: 0.0
+learning_rate: 0.0002
+weight_decay: 0.01
+lr_decay: 0.99
+
+# Model  (must match PoseMamba-S architecture in lib/model/PoseMamba.py)
+backbone: "PoseMamba"
+maxlen: 5        # temporal dimension – reduced to 5 frames
+dim_feat: 64
+mlp_ratio: 2
+depth: 10
+
+# Data
+data_root: data/motion3d/
+n_frames: 5      # sequence length fed to the model
+stride: 3        # stride for chunking training sequences
+no_conf: True    # remove confidence channel (input is x,y only, matching in_chans=2)
+flip: False       # horizontal-flip augmentation during training
+
+# Loss weights  (same structure as H36M config)
+lambda_3d: 1.0
+lambda_scale: 0.5
+lambda_3d_velocity: 20.0
+lambda_lv: 0.0
+lambda_lg: 0.0
+lambda_a: 0.0
+lambda_av: 0.0
+lambda_3dw: 0.0   # weighted MPJPE – disabled (joint ordering differs from H36M)
+lambda_diff: 0.5  # temporal consistency

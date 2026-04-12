@@ -353,6 +353,15 @@ def evaluate(args, model_pos, test_loader):
     call_times = np.array(inference_call_times_ms, dtype=np.float64)
     sample_times = np.array(inference_sample_times_ms, dtype=np.float64)
     frame_times = np.array(inference_frame_times_ms, dtype=np.float64)
+    sample_mean_ms = sample_times.mean() if sample_times.size > 0 else 0.0
+    sample_p50_ms = np.percentile(sample_times, 50) if sample_times.size > 0 else 0.0
+    sample_p95_ms = np.percentile(sample_times, 95) if sample_times.size > 0 else 0.0
+    sample_fps_mean = (1000.0 / sample_mean_ms) if sample_mean_ms > 0 else 0.0
+    sample_fps_p50 = (1000.0 / sample_p50_ms) if sample_p50_ms > 0 else 0.0
+    sample_fps_p95 = (1000.0 / sample_p95_ms) if sample_p95_ms > 0 else 0.0
+    frame_mean_ms = frame_times.mean() if frame_times.size > 0 else 0.0
+    frame_fps_mean = (1000.0 / frame_mean_ms) if frame_mean_ms > 0 else 0.0
+    window_center_delay_est_ms = ((args.n_frames - 1) / 2.0) * sample_mean_ms
 
     log.info(f'Protocol #1 Error (MPJPE): {mpjpe_mm:.2f} mm')
     if call_times.size > 0:
@@ -373,6 +382,12 @@ def evaluate(args, model_pos, test_loader):
             f'mean={frame_times.mean():.4f}, p50={np.percentile(frame_times, 50):.4f}, '
             f'p95={np.percentile(frame_times, 95):.4f}'
         )
+    log.info(
+        f'Inference FPS / sample: mean={sample_fps_mean:.2f}, '
+        f'p50={sample_fps_p50:.2f}, p95={sample_fps_p95:.2f}'
+    )
+    log.info(f'Inference FPS / frame: mean={frame_fps_mean:.2f}')
+    log.info(f'Estimated window-center delay (ms): {window_center_delay_est_ms:.3f}')
     log.info(f'PCK@10%_torso: {pck_metrics["PCK@10%_torso"] * 100:.2f}%')
     log.info(f'PCK@20%_torso: {pck_metrics["PCK@20%_torso"] * 100:.2f}%')
     log.info(f'PCK@30%_torso: {pck_metrics["PCK@30%_torso"] * 100:.2f}%')

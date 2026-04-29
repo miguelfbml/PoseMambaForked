@@ -59,7 +59,7 @@ CONNECTIONS_3D = [
 ]
 
 DEFAULT_YOLO_MODEL_PATH = os.path.join(ZDEMO_DIR, 'weights', 'yolo', 'best.pt')
-DEFAULT_POSEMAMBA_CONFIG = os.path.join(PROJECT_ROOT, 'configs', 'pose3d', 'PoseMamba_train_3dhp_S_9.yaml')
+DEFAULT_POSEMAMBA_CONFIG = os.path.join(PROJECT_ROOT, 'configs', 'pose3d', 'testing', 'notestaug','PoseMamba_train_3dhp_S_9.yaml')
 DEFAULT_POSEMAMBA_CHECKPOINT = os.path.join(ZDEMO_DIR, 'weights', 'PoseMamba', 'ModelS', 'best_epoch_9.bin')
 
 

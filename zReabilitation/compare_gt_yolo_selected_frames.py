@@ -321,10 +321,10 @@ def save_frame_comparison(image, gt_frame, yolo_frame, sequence_name, frame_idx,
 
     side_by_side = np.concatenate([gt_image, pred_image], axis=1)
 
+    # output_dir expected to be the per-sequence/camera folder
     os.makedirs(output_dir, exist_ok=True)
-    sequence_tag = sequence_name.replace('/', '_')
     detection_suffix = 'N' if no_yolo_detection else ''
-    output_filename = 'frame_{:06d}_gt_vs_yolo_{}_{}{}.png'.format(frame_idx, sequence_tag, camera_name, detection_suffix)
+    output_filename = 'frame_{:06d}_gt_vs_yolo_{}{}.png'.format(frame_idx, camera_name, detection_suffix)
     output_path = os.path.join(output_dir, output_filename)
     cv2.imwrite(output_path, side_by_side)
     return output_path
@@ -387,7 +387,13 @@ def process_selected_frames(model, sequence_name, frame_indices, args, device='c
     gt_poses_2d_pixel = convert_coordinates_to_pixels(np.array(selected_gt), selected_frames)
     yolo_poses_2d_pixel = convert_coordinates_to_pixels(yolo_poses_2d, selected_frames)
 
-    sequence_output_dir = args.output_dir
+    # Create output path relative to folders/subfolders (UCO) or sequence name (MPI)
+    if is_uco_dataset:
+        # folder and subfolder variables were set earlier for UCO
+        sequence_output_dir = os.path.join(args.output_dir, str(folder), str(subfolder), camera_name)
+    else:
+        sequence_output_dir = os.path.join(args.output_dir, sequence_name)
+
     os.makedirs(sequence_output_dir, exist_ok=True)
 
     saved_files = []

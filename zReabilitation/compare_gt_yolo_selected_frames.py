@@ -404,10 +404,50 @@ def process_selected_frames(model, sequence_name, frame_indices, args, device='c
     return saved_files
 
 
+def process_all_uco_sequences(model, frame_indices, args, device='cpu'):
+    """Process all UCO sequences: folders 0-26 and subfolders 01-16."""
+    processed = 0
+    skipped = 0
+
+    for folder in range(27):
+        for subfolder in range(1, 17):
+            subfolder_name = f'{subfolder:02d}'
+            sequence_name = f'{folder}/{subfolder_name}'
+
+            video_path = os.path.join(UCO_DATASET_PATH, str(folder), subfolder_name, f'{args.camera}.mp4')
+            gt_path = os.path.join(UCO_DATASET_PATH, str(folder), subfolder_name, f'{args.camera}_p2d.txt')
+
+            if not os.path.exists(video_path) or not os.path.exists(gt_path):
+                print(f"⚠ Skipping {sequence_name}: missing video or GT for {args.camera}")
+                skipped += 1
+                continue
+
+            print(f"\n{'=' * 80}")
+            print(f"Processing UCO sequence: {sequence_name} ({args.camera})")
+            print(f"{'=' * 80}")
+
+            try:
+                result = process_selected_frames(model, sequence_name, frame_indices, args, device)
+                if result is not None:
+                    processed += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                print(f"❌ Error processing {sequence_name}: {e}")
+                skipped += 1
+
+    print(f"\n{'=' * 80}")
+    print('UCO batch processing summary')
+    print(f'Processed sequences: {processed}')
+    print(f'Skipped/failed sequences: {skipped}')
+    print(f"{'=' * 80}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Save GT vs YOLO comparisons for selected frames only')
-    parser.add_argument('--sequence', type=str, required=True, 
+    parser.add_argument('--sequence', type=str, required=False,
                         help='Sequence to compare. For MPI 3DHP: TS1-TS6. For UCO dataset: folder/subfolder (e.g., 0/01)')
+    parser.add_argument('--all-uco', action='store_true', help='Process all UCO sequences: 0-26/01-16')
     parser.add_argument('--frames', type=int, nargs='+', required=True, help='Frame indices to process (0-based, space-separated)')
     parser.add_argument('--model-path', type=str, required=True, help='Path to trained YOLO model (.pt file)')
     parser.add_argument('--camera', type=str, default='cam0', help='Camera to use for UCO dataset (cam0-cam4, default: cam0)')
@@ -420,14 +460,20 @@ def main():
     if args.batch_size is not None and args.batch_size <= 0:
         parser.error('--batch-size must be a positive integer')
 
+    if not args.all_uco and not args.sequence:
+        parser.error('Provide --sequence or use --all-uco')
+
     print('🎯 Selected-frame GT vs YOLO comparison')
     print('=' * 80)
-    print(f'Sequence: {args.sequence}')
+    if args.all_uco:
+        print('Sequence: ALL UCO (0-26/01-16)')
+    else:
+        print(f'Sequence: {args.sequence}')
     print(f'Frames: {args.frames}')
     print(f'Model: {args.model_path}')
     print(f'Output dir: {args.output_dir}')
     print(f'Input size: {args.img_size}')
-    if '/' in args.sequence:
+    if args.all_uco or (args.sequence and '/' in args.sequence):
         print(f'Camera: {args.camera} (UCO dataset)')
     if args.batch_size is not None:
         print(f'Inference batch size (override): {args.batch_size}')
@@ -457,7 +503,10 @@ def main():
         return
 
     try:
-        process_selected_frames(model, args.sequence, args.frames, args, device)
+        if args.all_uco:
+            process_all_uco_sequences(model, args.frames, args, device)
+        else:
+            process_selected_frames(model, args.sequence, args.frames, args, device)
     finally:
         if gpu_available:
             torch.cuda.empty_cache()

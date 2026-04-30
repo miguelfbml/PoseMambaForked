@@ -13,11 +13,11 @@ echo "Running selected-frame GT vs YOLO comparison on UCO dataset"
 # Camera options: cam0, cam1, cam2, cam3, cam4
 
 
-# Process folder 0, subfolder 03 with cam1
+# Process all folders/subfolders: {0-26}/{01-16} with cam1
 python3 compare_gt_yolo_selected_frames.py \
-    --sequence "0/03" \
+    --all-uco \
     --camera "cam1" \
-    --frames 0 10 20 \
+    --frames 0 10 20 30 40 50 60 \
     --model-path "weights/YOLO/best.pt" \
     --output-dir "comparison_selected_frames_uco" \
     --img-size "640" \

@@ -324,7 +324,8 @@ def save_frame_comparison(image, gt_frame, yolo_frame, sequence_name, frame_idx,
     # output_dir expected to be the per-sequence/camera folder
     os.makedirs(output_dir, exist_ok=True)
     detection_suffix = 'N' if no_yolo_detection else ''
-    output_filename = 'frame_{:06d}_gt_vs_yolo_{}{}.png'.format(frame_idx, camera_name, detection_suffix)
+    sequence_tag = sequence_name.replace('/', '_')
+    output_filename = 'frame_{:06d}_gt_vs_yolo_{}_{}{}.png'.format(frame_idx, sequence_tag, camera_name, detection_suffix)
     output_path = os.path.join(output_dir, output_filename)
     cv2.imwrite(output_path, side_by_side)
     return output_path

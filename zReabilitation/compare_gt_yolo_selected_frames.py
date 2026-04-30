@@ -49,7 +49,8 @@ def load_uco_ground_truth_2d(folder, subfolder, camera):
     All keypoints are always visible.
     Maps 5 keypoint values to a 17-joint pose array for compatibility.
     """
-    gt_file = os.path.join(UCO_DATASET_PATH, str(folder), f'{subfolder:02d}', f'{camera}_p2d.txt')
+    subfolder_name = f'{int(subfolder):02d}'
+    gt_file = os.path.join(UCO_DATASET_PATH, str(folder), subfolder_name, f'{camera}_p2d.txt')
     
     if not os.path.exists(gt_file):
         print(f"❌ Ground truth file not found: {gt_file}")

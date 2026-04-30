@@ -45,7 +45,7 @@ UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/datas
 def load_uco_ground_truth_2d(folder, subfolder, camera):
     """Load 2D ground truth poses from UCO _p2d.txt file
     
-    Format: Each line contains 5 values representing coordinates of 5 keypoints (one frame per line)
+    Format: Each line contains x/y coordinate pairs for the visible keypoints.
     All keypoints are always visible.
     Maps 5 keypoint values to a 17-joint pose array for compatibility.
     """
@@ -65,31 +65,19 @@ def load_uco_ground_truth_2d(folder, subfolder, camera):
                     continue
                 
                 values = [float(x) for x in line.split()]
-                
-                # Handle 5 values per line (5 keypoint coordinates)
-                if len(values) >= 5:
-                    # Create a 17-joint pose array for compatibility
+
+                # Handle coordinate pairs per line: x1 y1 x2 y2 ...
+                if len(values) >= 2:
+                    # Create a 17-joint pose array for compatibility.
                     pose = np.zeros((17, 2))
-                    
-                    # Map 5 keypoint values to 17-joint format
-                    # Assuming format: x1, y1, x2, y2, x3 (or similar coordinate pairs)
-                    # Distribute the 5 values across the 5 available keypoints
-                    keypoint_values = values[:5]
-                    
-                    # Map to joints (e.g., important joints for rehabilitation: wrists, elbows, shoulders)
-                    # Joints: 1=Spine, 2=LShoulder, 3=LElbow, 4=LWrist, 5=RShoulder
-                    joint_indices = [1, 2, 3, 4, 5]  # Map to first 5 relevant joints
-                    
-                    for i, joint_idx in enumerate(joint_indices):
-                        if i < len(keypoint_values):
-                            # Each keypoint needs x,y - parse the values accordingly
-                            if i * 2 + 1 < len(keypoint_values):
-                                # If we have pairs: x, y, x, y, ...
-                                pose[joint_idx, 0] = keypoint_values[i * 2]
-                                pose[joint_idx, 1] = keypoint_values[i * 2 + 1]
-                            else:
-                                # Handle odd number of values (set x coordinate)
-                                pose[joint_idx, 0] = keypoint_values[i]
+
+                    keypoint_pairs = len(values) // 2
+                    joint_indices = [1, 2, 3, 4, 5]
+
+                    for i in range(min(keypoint_pairs, len(joint_indices))):
+                        joint_idx = joint_indices[i]
+                        pose[joint_idx, 0] = values[i * 2]
+                        pose[joint_idx, 1] = values[i * 2 + 1]
                     
                     poses.append(pose)
         
@@ -106,7 +94,8 @@ def load_uco_ground_truth_2d(folder, subfolder, camera):
 
 def load_uco_frames_from_video(folder, subfolder, camera, frame_indices=None):
     """Load frames from UCO video file"""
-    video_path = os.path.join(UCO_DATASET_PATH, str(folder), f'{subfolder:02d}', f'{camera}.mp4')
+    subfolder_name = f'{int(subfolder):02d}'
+    video_path = os.path.join(UCO_DATASET_PATH, str(folder), subfolder_name, f'{camera}.mp4')
     
     if not os.path.exists(video_path):
         print(f"❌ Video file not found: {video_path}")

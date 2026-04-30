@@ -13,6 +13,19 @@ echo "Running selected-frame GT vs YOLO comparison on UCO dataset"
 # Camera options: cam0, cam1, cam2, cam3, cam4
 
 
+# Process all folders/subfolders: {0-26}/{01-16} with cam0
+python3 compare_gt_yolo_selected_frames.py \
+    --all-uco \
+    --camera "cam0" \
+    --frames 0 10 20 30 40 50 60 \
+    --model-path "weights/YOLO/best.pt" \
+    --output-dir "comparison_selected_frames_uco" \
+    --img-size "640" \
+    --batch-size "32" \
+    --device "cuda:0"
+
+
+
 # Process all folders/subfolders: {0-26}/{01-16} with cam1
 python3 compare_gt_yolo_selected_frames.py \
     --all-uco \
@@ -24,6 +37,41 @@ python3 compare_gt_yolo_selected_frames.py \
     --batch-size "32" \
     --device "cuda:0"
 
+
+# Process all folders/subfolders: {0-26}/{01-16} with cam2
+python3 compare_gt_yolo_selected_frames.py \
+    --all-uco \
+    --camera "cam2" \
+    --frames 0 10 20 30 40 50 60 \
+    --model-path "weights/YOLO/best.pt" \
+    --output-dir "comparison_selected_frames_uco" \
+    --img-size "640" \
+    --batch-size "32" \
+    --device "cuda:0"
+
+
+# Process all folders/subfolders: {0-26}/{01-16} with cam3
+python3 compare_gt_yolo_selected_frames.py \
+    --all-uco \
+    --camera "cam3" \
+    --frames 0 10 20 30 40 50 60 \
+    --model-path "weights/YOLO/best.pt" \
+    --output-dir "comparison_selected_frames_uco" \
+    --img-size "640" \
+    --batch-size "32" \
+    --device "cuda:0"
+
+
+# Process all folders/subfolders: {0-26}/{01-16} with cam4
+python3 compare_gt_yolo_selected_frames.py \
+    --all-uco \
+    --camera "cam4" \
+    --frames 0 10 20 30 40 50 60 \
+    --model-path "weights/YOLO/best.pt" \
+    --output-dir "comparison_selected_frames_uco" \
+    --img-size "640" \
+    --batch-size "32" \
+    --device "cuda:0"
 
 
 echo "✓ Completed UCO dataset comparison"

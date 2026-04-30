@@ -271,7 +271,7 @@ def draw_pose_on_image(image, pose, title, line_color, point_color, missing_text
     return output
 
 
-def save_frame_comparison(image, gt_frame, yolo_frame, sequence_name, frame_idx, output_dir):
+def save_frame_comparison(image, gt_frame, yolo_frame, sequence_name, frame_idx, output_dir, camera_name='camNA'):
     gt_image = draw_pose_on_image(
         image,
         gt_frame,
@@ -290,8 +290,10 @@ def save_frame_comparison(image, gt_frame, yolo_frame, sequence_name, frame_idx,
         missing_text='No YOLO Detection',
     )
 
+    no_yolo_detection = yolo_frame is None or np.all(yolo_frame == 0)
+
     frame_err = float('nan')
-    if gt_frame is not None and yolo_frame is not None and not np.all(gt_frame == 0) and not np.all(yolo_frame == 0):
+    if gt_frame is not None and yolo_frame is not None and not np.all(gt_frame == 0) and not no_yolo_detection:
         frame_err = float(np.mean(np.linalg.norm(gt_frame - yolo_frame, axis=1)))
 
     if not np.isnan(frame_err):
@@ -320,7 +322,10 @@ def save_frame_comparison(image, gt_frame, yolo_frame, sequence_name, frame_idx,
     side_by_side = np.concatenate([gt_image, pred_image], axis=1)
 
     os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, 'frame_{:06d}_gt_vs_yolo.png'.format(frame_idx))
+    sequence_tag = sequence_name.replace('/', '_')
+    detection_suffix = 'N' if no_yolo_detection else ''
+    output_filename = 'frame_{:06d}_gt_vs_yolo_{}_{}{}.png'.format(frame_idx, sequence_tag, camera_name, detection_suffix)
+    output_path = os.path.join(output_dir, output_filename)
     cv2.imwrite(output_path, side_by_side)
     return output_path
 
@@ -328,12 +333,14 @@ def save_frame_comparison(image, gt_frame, yolo_frame, sequence_name, frame_idx,
 def process_selected_frames(model, sequence_name, frame_indices, args, device='cpu'):
     # Check if this is UCO format (contains "/")
     is_uco_dataset = '/' in sequence_name
+    camera_name = 'camNA'
     
     if is_uco_dataset:
         # Load UCO ground truth
         parts = sequence_name.split('/')
         folder, subfolder = parts[0], parts[1]
         camera = args.camera if hasattr(args, 'camera') else 'cam0'
+        camera_name = camera
         
         gt_poses_2d = load_uco_ground_truth_2d(folder, subfolder, camera)
         if gt_poses_2d is None:
@@ -380,7 +387,7 @@ def process_selected_frames(model, sequence_name, frame_indices, args, device='c
     gt_poses_2d_pixel = convert_coordinates_to_pixels(np.array(selected_gt), selected_frames)
     yolo_poses_2d_pixel = convert_coordinates_to_pixels(yolo_poses_2d, selected_frames)
 
-    sequence_output_dir = os.path.join(args.output_dir, sequence_name)
+    sequence_output_dir = args.output_dir
     os.makedirs(sequence_output_dir, exist_ok=True)
 
     saved_files = []
@@ -392,6 +399,7 @@ def process_selected_frames(model, sequence_name, frame_indices, args, device='c
             sequence_name,
             frame_idx,
             sequence_output_dir,
+            camera_name,
         )
         saved_files.append(saved_path)
         print(f"✓ Saved comparison for frame {frame_idx} -> {saved_path}")

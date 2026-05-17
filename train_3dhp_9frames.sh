@@ -5,6 +5,7 @@
 #SBATCH --job-name=train3dhpS9Frames    # Job name
 #SBATCH --output=slurm_%x.%j.out   # File containing STDOUT output
 #SBATCH --error=slurm_%x.%j.err    # File containing STDERR output. If ommited, use STDOUT.
+echo "Starting training job for PoseMamba on MPI-INF-3DHP"
 
 # Training script for PoseMamba-S on MPI-INF-3DHP with 9-frame temporal window
 

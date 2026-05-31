@@ -248,12 +248,7 @@ def load_posemamba_model(config_path, checkpoint_path, device):
 def prepare_pose_for_plot(pose_3d):
     corrected = apply_upright_correction(pose_3d)
     root_relative = make_root_relative_3d(corrected, root_joint_idx=14)
-    return root_relative
-
-
-def prepare_demo_pose_for_plot(pose_3d):
-    pose_for_plot = prepare_pose_for_plot(pose_3d)
-    return scale_pose_to_max(pose_for_plot, max_value=900)
+    return scale_pose_to_max(root_relative, max_value=900)
 
 
 def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
@@ -306,7 +301,7 @@ def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
 
 def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, output_dir):
     gt_plot = prepare_pose_for_plot(gt_pose)
-    pred_plot = prepare_demo_pose_for_plot(pred_pose)
+    pred_plot = prepare_pose_for_plot(pred_pose)
 
     valid_gt = gt_plot[~np.isnan(gt_plot) & ~np.isinf(gt_plot)]
     valid_pred = pred_plot[~np.isnan(pred_plot) & ~np.isinf(pred_plot)]

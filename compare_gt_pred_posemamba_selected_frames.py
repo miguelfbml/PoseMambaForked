@@ -251,6 +251,11 @@ def prepare_pose_for_plot(pose_3d):
     return root_relative
 
 
+def prepare_demo_pose_for_plot(pose_3d):
+    pose_for_plot = prepare_pose_for_plot(pose_3d)
+    return scale_pose_to_max(pose_for_plot, max_value=900)
+
+
 def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
     ax.set_title(title, fontsize=12)
     ax.set_xlabel('X (mm, right)', fontsize=10)
@@ -301,7 +306,7 @@ def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
 
 def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, output_dir):
     gt_plot = prepare_pose_for_plot(gt_pose)
-    pred_plot = prepare_pose_for_plot(pred_pose)
+    pred_plot = prepare_demo_pose_for_plot(pred_pose)
 
     valid_gt = gt_plot[~np.isnan(gt_plot) & ~np.isinf(gt_plot)]
     valid_pred = pred_plot[~np.isnan(pred_plot) & ~np.isinf(pred_plot)]

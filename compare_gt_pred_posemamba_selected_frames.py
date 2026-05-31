@@ -76,7 +76,7 @@ DEFAULT_POSEMAMBA_CHECKPOINT = os.path.join(
     'ModelS',
     'best_epoch_5.bin',
 )
-DEFAULT_GT_DATA = os.path.join(PROJECT_ROOT, 'motion3d', 'GT', 'data_test_3dhp.npz')
+DEFAULT_GT_DATA = os.path.join(PROJECT_ROOT, 'data', 'motion3d', 'data_test_3dhp.npz')
 DEFAULT_IMAGE_ROOT = '/nas-ctm01/datasets/public/mpi_inf_3dhp/mpi_inf_3dhp_test_set'
 
 
@@ -380,8 +380,9 @@ def process_selected_frames(sequence_name, frame_indices, args):
     gt_data_path = resolve_existing_path(
         [
             args.gt_data,
-            os.path.join(PROJECT_ROOT, '..', 'motion3d', 'GT', 'data_test_3dhp.npz'),
-            os.path.join(PROJECT_ROOT, 'motion3d', 'GT', 'data_test_3dhp.npz'),
+            os.path.join(PROJECT_ROOT, 'data', 'motion3d', 'data_test_3dhp.npz'),
+            os.path.join(PROJECT_ROOT, '..', 'motion3d', 'data_test_3dhp.npz'),
+            os.path.join(PROJECT_ROOT, 'motion3d', 'data_test_3dhp.npz'),
         ]
     )
     gt_poses_2d, gt_poses_3d, seq_name = load_gt_sequence_data(gt_data_path, sequence_name)

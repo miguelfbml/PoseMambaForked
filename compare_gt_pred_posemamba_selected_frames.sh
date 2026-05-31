@@ -17,7 +17,7 @@ python3 compare_gt_pred_posemamba_selected_frames.py \
     --posemamba-config "configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \
     --image-root "/nas-ctm01/datasets/public/mpi_inf_3dhp/mpi_inf_3dhp_test_set" \
-    --gt-data "motion3d/GT/data_test_3dhp.npz" \
+    --gt-data "data/motion3d/data_test_3dhp.npz" \
     --img-size "640" \
     --batch-size "32" \
     --device "cuda:0"
@@ -31,7 +31,7 @@ python3 compare_gt_pred_posemamba_selected_frames.py \
     --posemamba-config "configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \
     --image-root "/nas-ctm01/datasets/public/mpi_inf_3dhp/mpi_inf_3dhp_test_set" \
-    --gt-data "motion3d/GT/data_test_3dhp.npz" \
+    --gt-data "data/motion3d/data_test_3dhp.npz" \
     --img-size "640" \
     --batch-size "32" \
     --device "cuda:0"
@@ -45,7 +45,7 @@ python3 compare_gt_pred_posemamba_selected_frames.py \
     --posemamba-config "configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \
     --image-root "/nas-ctm01/datasets/public/mpi_inf_3dhp/mpi_inf_3dhp_test_set" \
-    --gt-data "motion3d/GT/data_test_3dhp.npz" \
+    --gt-data "data/motion3d/data_test_3dhp.npz" \
     --img-size "640" \
     --batch-size "32" \
     --device "cuda:0"
@@ -59,7 +59,7 @@ python3 compare_gt_pred_posemamba_selected_frames.py \
     --posemamba-config "configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \
     --image-root "/nas-ctm01/datasets/public/mpi_inf_3dhp/mpi_inf_3dhp_test_set" \
-    --gt-data "motion3d/GT/data_test_3dhp.npz" \
+    --gt-data "data/motion3d/data_test_3dhp.npz" \
     --img-size "640" \
     --batch-size "32" \
     --device "cuda:0"
@@ -73,7 +73,7 @@ python3 compare_gt_pred_posemamba_selected_frames.py \
     --posemamba-config "configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \
     --image-root "/nas-ctm01/datasets/public/mpi_inf_3dhp/mpi_inf_3dhp_test_set" \
-    --gt-data "motion3d/GT/data_test_3dhp.npz" \
+    --gt-data "data/motion3d/data_test_3dhp.npz" \
     --img-size "640" \
     --batch-size "32" \
     --device "cuda:0"
@@ -87,7 +87,7 @@ python3 compare_gt_pred_posemamba_selected_frames.py \
     --posemamba-config "configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \
     --image-root "/nas-ctm01/datasets/public/mpi_inf_3dhp/mpi_inf_3dhp_test_set" \
-    --gt-data "motion3d/GT/data_test_3dhp.npz" \
+    --gt-data "data/motion3d/data_test_3dhp.npz" \
     --img-size "640" \
     --batch-size "32" \
     --device "cuda:0"

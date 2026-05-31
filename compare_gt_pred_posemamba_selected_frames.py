@@ -485,7 +485,14 @@ def main():
     parser.add_argument('--output-dir', type=str, default='comparison_posemamba_selected_frames', help='Directory for saved comparison images')
     parser.add_argument('--image-root', type=str, default=DEFAULT_IMAGE_ROOT, help='Root folder that contains <sequence>/imageSequence')
     parser.add_argument('--gt-data', type=str, default=DEFAULT_GT_DATA, help='Path to the GT data_test_3dhp.npz file')
-    parser.add_argument('--yolo-model', type=str, default=DEFAULT_YOLO_MODEL_PATH, help='Path to the trained YOLOv11x-Pose model')
+    parser.add_argument(
+        '--yolo-model',
+        '--model-path',
+        dest='yolo_model',
+        type=str,
+        default=DEFAULT_YOLO_MODEL_PATH,
+        help='Path to the trained YOLOv11x-Pose model',
+    )
     parser.add_argument('--posemamba-config', type=str, default=DEFAULT_POSEMAMBA_CONFIG, help='Path to the PoseMamba config file')
     parser.add_argument('--posemamba-checkpoint', type=str, default=DEFAULT_POSEMAMBA_CHECKPOINT, help='Path to the PoseMamba checkpoint file')
     parser.add_argument('--img-size', type=int, default=640, help='YOLO input image size')

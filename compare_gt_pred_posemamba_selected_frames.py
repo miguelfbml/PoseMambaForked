@@ -251,22 +251,6 @@ def prepare_pose_for_plot(pose_3d):
     return root_relative
 
 
-def prepare_pred_pose_for_plot(pose_3d, reference_pose=None):
-    pred_plot = prepare_pose_for_plot(pose_3d)
-
-    if reference_pose is not None:
-        reference_extent = np.max(np.abs(reference_pose))
-        pred_extent = np.max(np.abs(pred_plot))
-        if pred_extent > 1e-6 and reference_extent > 1e-6:
-            pred_plot = pred_plot * (reference_extent / pred_extent)
-        else:
-            pred_plot = scale_pose_to_max(pred_plot, max_value=900)
-    else:
-        pred_plot = scale_pose_to_max(pred_plot, max_value=900)
-
-    return pred_plot
-
-
 def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
     ax.set_title(title, fontsize=12)
     ax.set_xlabel('X (mm, right)', fontsize=10)
@@ -317,17 +301,17 @@ def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
 
 def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, output_dir):
     gt_plot = prepare_pose_for_plot(gt_pose)
-    pred_plot = prepare_pred_pose_for_plot(pred_pose, reference_pose=gt_plot)
+    pred_plot = prepare_pose_for_plot(pred_pose)
 
-    combined = np.vstack([gt_plot.reshape(-1, 3), pred_plot.reshape(-1, 3)])
-    combined = combined[~np.isnan(combined).any(axis=1)]
-    if len(combined) == 0:
-        combined = np.zeros((1, 3), dtype=np.float32)
-
-    plot_points = np.vstack([gt_plot.reshape(-1, 3), pred_plot.reshape(-1, 3)])
-    min_value = np.min(plot_points, axis=0)
-    max_value = np.max(plot_points, axis=0)
-    padding = np.maximum((max_value - min_value) * 0.12, 40.0)
+    valid_gt = gt_plot[~np.isnan(gt_plot) & ~np.isinf(gt_plot)]
+    valid_pred = pred_plot[~np.isnan(pred_plot) & ~np.isinf(pred_plot)]
+    if valid_gt.size == 0:
+        all_poses = valid_pred
+    else:
+        all_poses = np.vstack([valid_gt.reshape(-1, 3), valid_pred.reshape(-1, 3)])
+    min_value = np.min(all_poses, axis=0)
+    max_value = np.max(all_poses, axis=0)
+    padding = (max_value - min_value) * 0.1
     min_value -= padding
     max_value += padding
 

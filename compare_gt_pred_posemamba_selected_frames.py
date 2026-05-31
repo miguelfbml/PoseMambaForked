@@ -275,9 +275,9 @@ def prepare_pose_for_plot(pose_3d):
 
 def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
     ax.set_title(title, fontsize=12)
-    ax.set_xlabel('X (mm, right)', fontsize=10)
-    ax.set_ylabel('Y (mm, forward)', fontsize=10)
-    ax.set_zlabel('Z (mm, up)', fontsize=10)
+    ax.set_xlabel('X (right)', fontsize=10)
+    ax.set_ylabel('Y (forward)', fontsize=10)
+    ax.set_zlabel('Z (up)', fontsize=10)
     ax.view_init(elev=15, azim=45)
 
     if pose_3d is None or np.allclose(pose_3d, 0.0):
@@ -348,10 +348,34 @@ def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, o
         fontsize=14,
     )
 
-    for ax in (ax_gt, ax_pred):
-        ax.set_xlim3d([min_value[0], max_value[0]])
-        ax.set_ylim3d([min_value[1], max_value[1]])
-        ax.set_zlim3d([min_value[2], max_value[2]])
+    # Compute a shared extent but center each subplot on joint index 14
+    span = max_value - min_value
+    # ensure a sensible extent if pose is degenerate
+    span = np.where(span <= 1e-6, 1.0, span)
+    padding = (max_value - min_value) * 0.1
+    min_value -= padding
+    max_value += padding
+    span = max_value - min_value
+    half_extent = span / 2.0
+
+    def _get_center(plot):
+        if plot is None or (np.isnan(plot).all() or np.isinf(plot).all()):
+            return (min_value + max_value) / 2.0
+        if plot.shape[0] > 14:
+            return plot[14]
+        return (min_value + max_value) / 2.0
+
+    center_gt = _get_center(gt_plot)
+    center_pred = _get_center(pred_plot)
+
+    # Set limits centered on joint-14 for each subplot, using the same half-extent
+    ax_gt.set_xlim3d([center_gt[0] - half_extent[0], center_gt[0] + half_extent[0]])
+    ax_gt.set_ylim3d([center_gt[1] - half_extent[1], center_gt[1] + half_extent[1]])
+    ax_gt.set_zlim3d([center_gt[2] - half_extent[2], center_gt[2] + half_extent[2]])
+
+    ax_pred.set_xlim3d([center_pred[0] - half_extent[0], center_pred[0] + half_extent[0]])
+    ax_pred.set_ylim3d([center_pred[1] - half_extent[1], center_pred[1] + half_extent[1]])
+    ax_pred.set_zlim3d([center_pred[2] - half_extent[2], center_pred[2] + half_extent[2]])
 
     plot_3d_skeleton(
         ax_gt,

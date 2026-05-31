@@ -273,7 +273,7 @@ def prepare_pose_for_plot(pose_3d):
     return post_out
 
 
-def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
+def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text, show_dots=True):
     ax.set_title(title, fontsize=12)
     ax.set_xlabel('X (right)', fontsize=10)
     ax.set_ylabel('Y (forward)', fontsize=10)
@@ -297,22 +297,23 @@ def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
                 alpha=0.85,
             )
 
-    xs = pose_3d[:, 0]
-    ys = pose_3d[:, 1]
-    zs = pose_3d[:, 2]
-    ax.scatter(xs, ys, zs, c=point_color, s=45, alpha=0.9, edgecolors='black', linewidth=0.4)
-    if len(pose_3d) > 14:
-        ax.scatter(
-            [pose_3d[14, 0]],
-            [pose_3d[14, 1]],
-            [pose_3d[14, 2]],
-            c='green',
-            s=120,
-            marker='*',
-            alpha=1.0,
-            edgecolors='darkgreen',
-            linewidth=1,
-        )
+    if show_dots:
+        xs = pose_3d[:, 0]
+        ys = pose_3d[:, 1]
+        zs = pose_3d[:, 2]
+        ax.scatter(xs, ys, zs, c=point_color, s=45, alpha=0.9, edgecolors='black', linewidth=0.4)
+        if len(pose_3d) > 14:
+            ax.scatter(
+                [pose_3d[14, 0]],
+                [pose_3d[14, 1]],
+                [pose_3d[14, 2]],
+                c='green',
+                s=120,
+                marker='*',
+                alpha=1.0,
+                edgecolors='darkgreen',
+                linewidth=1,
+            )
 
     for joint_idx, (x, y, z) in enumerate(pose_3d):
         joint_name = JOINT_NAMES[joint_idx] if joint_idx < len(JOINT_NAMES) else f'Joint_{joint_idx}'
@@ -321,7 +322,7 @@ def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):
     ax.grid(True, alpha=0.25)
 
 
-def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, output_dir):
+def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, output_dir, show_dots=True):
     gt_plot = prepare_pose_for_plot(gt_pose)
     pred_plot = prepare_pose_for_plot(pred_pose)
 
@@ -384,6 +385,7 @@ def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, o
         line_color='royalblue',
         point_color='deepskyblue',
         missing_text='No GT Data',
+        show_dots=show_dots,
     )
     plot_3d_skeleton(
         ax_pred,
@@ -392,6 +394,7 @@ def save_frame_comparison(image, gt_pose, pred_pose, sequence_name, frame_idx, o
         line_color='tomato',
         point_color='salmon',
         missing_text='No Prediction',
+        show_dots=show_dots,
     )
 
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -504,6 +507,7 @@ def process_selected_frames(sequence_name, frame_indices, args):
             sequence_name,
             frame_idx,
             output_sequence_dir,
+            show_dots=not args.no_dot,
         )
         saved_files.append(saved_path)
         print(f'Saved frame {frame_idx} -> {saved_path}')
@@ -542,6 +546,7 @@ def main():
     parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cpu, cuda, cuda:0, etc.')
     parser.add_argument('--window-size', type=int, default=5, help='PoseMamba temporal window size (must be odd)')
     parser.add_argument('--flip-tta', action='store_true', help='Enable flip test-time augmentation for PoseMamba')
+    parser.add_argument('--no-dot', action='store_true', help='Hide the joint markers and show only the skeleton lines')
     parser.add_argument('--disable-triton', action='store_true', help='Disable Triton imports for PoseMamba')
     args = parser.parse_args()
 

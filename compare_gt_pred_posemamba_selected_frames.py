@@ -48,6 +48,7 @@ from lib.utils.learning import load_backbone  # noqa: E402
 from lib.utils.tools import get_config  # noqa: E402
 from lib.utils.utils_data import flip_data  # noqa: E402
 from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
+from demo.lib.utils import camera_to_world  # noqa: E402
 
 JOINT_NAMES = [
     'Head', 'SpineShoulder', 'LShoulder', 'LElbow', 'LHand',
@@ -246,9 +247,30 @@ def load_posemamba_model(config_path, checkpoint_path, device):
 
 
 def prepare_pose_for_plot(pose_3d):
-    corrected = apply_upright_correction(pose_3d)
-    root_relative = make_root_relative_3d(corrected, root_joint_idx=14)
-    return scale_pose_to_max(root_relative, max_value=900)
+    # Align coordinate post-processing with vis.py demo pipeline:
+    # - convert camera->world using the same rotation
+    # - shift Z so min(Z)=0
+    # - normalize by the global max coordinate (unit-scale)
+    if pose_3d is None:
+        return None
+    post_out = pose_3d.copy().astype(np.float32)
+
+    # use the same rotation quaternion/vector as in vis.py
+    rot = np.array([0.1407056450843811, -0.1500701755285263, -0.755240797996521, 0.6223280429840088], dtype=np.float32)
+    try:
+        post_out = camera_to_world(post_out, R=rot, t=0)
+    except Exception:
+        # fallback: if camera_to_world isn't compatible, continue with pose as-is
+        pass
+
+    # shift so lowest Z is zero (same as vis.py)
+    post_out[:, 2] -= np.min(post_out[:, 2])
+
+    max_value = np.max(post_out)
+    if max_value < 1e-6:
+        return post_out
+    post_out = post_out / max_value
+    return post_out
 
 
 def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text):

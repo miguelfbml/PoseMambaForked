@@ -19,7 +19,7 @@ python3 count_uco_yolo_sequences.py \
     --model-path "weights/YOLO/best.pt" \
     --output-dir "uco_yolo_sequence_output" \
     --img-size "640" \
-    --batch-size "32" \
+    --batch-size "1" \
     --confidence "0.35" \
     --device "cuda:0" \
     --no-save-videos \

@@ -287,9 +287,12 @@ def process_all_uco_sequences(model, args, device):
         print(f'\n--- Subject {folder:02d} start ---')
         subject_processed = 0
         for subfolder in SUBFOLDER_RANGE:
+            print(f'  -> Subfolder {folder:02d}/{subfolder:02d} start')
             for camera in args.cameras:
+                print(f'     -> Camera {camera} start')
                 result = process_sequence_camera(model, folder, subfolder, camera, args, device)
                 if result is None:
+                    print(f'     <- Camera {camera} skipped or failed')
                     continue
 
                 sequence_results.append(result)
@@ -328,6 +331,10 @@ def process_all_uco_sequences(model, args, device):
                 if device.startswith('cuda'):
                     torch.cuda.empty_cache()
                 gc.collect()
+
+                print(f'     <- Camera {camera} done')
+
+            print(f'  <- Subfolder {folder:02d}/{subfolder:02d} done')
 
         print(f'--- Subject {folder:02d} done ({subject_processed} sequence-camera runs) ---')
 

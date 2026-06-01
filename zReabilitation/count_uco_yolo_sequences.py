@@ -317,6 +317,17 @@ def process_all_uco_sequences(model, args, device):
                     print(f'     <- Camera {camera} skipped or failed')
                     continue
 
+                if result.get('cuda_error'):
+                    failure_location = f"{result['sequence']} | {camera}"
+                    failure_message = result.get('cuda_error_message') or 'CUDA runtime error'
+                    print(
+                        f'\nFATAL: stopping job after first CUDA error at {failure_location}. '
+                        f'Last error: {failure_message}'
+                    )
+                    raise RuntimeError(
+                        f'CUDA failure at {failure_location}: {failure_message}'
+                    )
+
                 sequence_results.append(result)
                 subject_processed += 1
 

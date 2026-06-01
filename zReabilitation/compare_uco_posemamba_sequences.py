@@ -18,6 +18,7 @@ python compare_uco_posemamba_sequences.py \
     --output-dir uco_posemamba_sequence_output
 """
 
+
 import argparse
 import gc
 import os

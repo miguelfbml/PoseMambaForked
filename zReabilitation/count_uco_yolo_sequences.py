@@ -62,6 +62,14 @@ def format_ratio(numerator, denominator):
     return f'{numerator}/{denominator}'
 
 
+def safe_empty_cache():
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except RuntimeError as exc:
+        print(f'⚠ CUDA cache cleanup skipped: {exc}')
+
+
 def predict_batch(model, frames, img_size, device, confidence):
     results = model.predict(
         frames,
@@ -329,7 +337,7 @@ def process_all_uco_sequences(model, args, device):
                     totals['detection_rate'] = totals['detected_frames'] / totals['total_frames']
 
                 if device.startswith('cuda'):
-                    torch.cuda.empty_cache()
+                    safe_empty_cache()
                 gc.collect()
 
                 print(f'     <- Camera {camera} done')
@@ -400,7 +408,7 @@ def main():
         process_all_uco_sequences(model, args, device)
     finally:
         if gpu_available:
-            torch.cuda.empty_cache()
+            safe_empty_cache()
         gc.collect()
 
 

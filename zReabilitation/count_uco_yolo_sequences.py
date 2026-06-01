@@ -2,8 +2,8 @@
 Process UCO videos with YOLO pose estimation and count detected vs undetected frames.
 
 The script walks folders 0-26 and subfolders 09-16 by default, processes all cameras
-unless a subset is provided, saves an annotated mp4 for every processed video, and
-prints/saves summary counts per sequence and per camera.
+unless a subset is provided, optionally saves an annotated mp4 for every processed
+video, and prints/saves summary counts per sequence and per camera.
 
 Example:
 python count_uco_yolo_sequences.py \
@@ -179,19 +179,22 @@ def process_sequence_camera(model, folder, subfolder, camera, args, device):
         print(f'⚠ Skipping {sequence_name} {camera}: cannot open video')
         return None
 
-    output_video_path = make_output_video_path(args.output_dir, folder, subfolder, camera)
-    os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
+    output_video_path = None
+    writer = None
+    if args.save_videos:
+        output_video_path = make_output_video_path(args.output_dir, folder, subfolder, camera)
+        os.makedirs(os.path.dirname(output_video_path), exist_ok=True)
 
-    writer = cv2.VideoWriter(
-        output_video_path,
-        cv2.VideoWriter_fourcc(*'mp4v'),
-        fps,
-        (width, height),
-    )
-    if not writer.isOpened():
-        cap.release()
-        print(f'⚠ Skipping {sequence_name} {camera}: cannot create output video')
-        return None
+        writer = cv2.VideoWriter(
+            output_video_path,
+            cv2.VideoWriter_fourcc(*'mp4v'),
+            fps,
+            (width, height),
+        )
+        if not writer.isOpened():
+            cap.release()
+            print(f'⚠ Skipping {sequence_name} {camera}: cannot create output video')
+            return None
 
     total_frames = 0
     detected_frames = 0
@@ -202,7 +205,10 @@ def process_sequence_camera(model, folder, subfolder, camera, args, device):
     print('\n' + '=' * 80)
     print(f'Processing {sequence_name} | {camera}')
     print(f'Input:  {video_path}')
-    print(f'Output: {output_video_path}')
+    if output_video_path is not None:
+        print(f'Output: {output_video_path}')
+    else:
+        print('Output: not saving video')
     print(f'FPS: {fps:.2f} | Size: {width}x{height}')
     print('=' * 80)
 
@@ -238,11 +244,13 @@ def process_sequence_camera(model, folder, subfolder, camera, args, device):
                     pose_count,
                     status_text,
                 )
-                writer.write(annotated_frame)
+                if writer is not None:
+                    writer.write(annotated_frame)
 
     finally:
         cap.release()
-        writer.release()
+        if writer is not None:
+            writer.release()
 
     summary = {
         'sequence': sequence_name,
@@ -409,6 +417,9 @@ def main():
     parser.add_argument('--confidence', type=float, default=0.65, help='YOLO confidence threshold')
     parser.add_argument('--device', type=str, default='auto', help='Device to use (auto, cpu, cuda, cuda:0, etc.)')
     parser.add_argument('--cameras', type=str, nargs='*', default=DEFAULT_CAMERAS, help='Cameras to process (default: cam0 cam1 cam2 cam3 cam4)')
+    parser.add_argument('--save-videos', dest='save_videos', action='store_true', help='Save annotated mp4 videos')
+    parser.add_argument('--no-save-videos', dest='save_videos', action='store_false', help='Do not save annotated mp4 videos')
+    parser.set_defaults(save_videos=True)
     args = parser.parse_args()
 
     if args.batch_size <= 0:
@@ -424,6 +435,7 @@ def main():
     print(f'Cameras: {args.cameras}')
     print(f'Model: {args.model_path}')
     print(f'Output dir: {args.output_dir}')
+    print(f'Save videos: {args.save_videos}')
     print(f'Input size: {args.img_size}')
     print(f'Batch size: {args.batch_size}')
     print(f'Confidence: {args.confidence}')

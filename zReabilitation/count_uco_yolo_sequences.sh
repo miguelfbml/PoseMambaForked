@@ -17,6 +17,7 @@ python3 count_uco_yolo_sequences.py \
     --batch-size "16" \
     --confidence "0.35" \
     --device "cuda:0" \
+    --no-save-videos \
     --cameras cam0 cam1 cam2 cam3 cam4
 
 echo "✓ Completed UCO YOLO counting run"

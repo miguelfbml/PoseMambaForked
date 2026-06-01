@@ -62,14 +62,6 @@ def format_ratio(numerator, denominator):
     return f'{numerator}/{denominator}'
 
 
-def safe_empty_cache():
-    try:
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except RuntimeError as exc:
-        print(f'⚠ CUDA cache cleanup skipped: {exc}')
-
-
 def predict_batch(model, frames, img_size, device, confidence):
     results = model.predict(
         frames,
@@ -137,6 +129,8 @@ def process_sequence_camera(model, folder, subfolder, camera, args, device):
     detected_frames = 0
     not_detected_frames = 0
     total_pose_instances = 0
+    cuda_error = False
+    cuda_error_message = None
     batch_size = args.batch_size
 
     print('\n' + '=' * 80)
@@ -161,7 +155,13 @@ def process_sequence_camera(model, folder, subfolder, camera, args, device):
             if not batch_frames:
                 break
 
-            batch_predictions = predict_batch(model, batch_frames, args.img_size, device, args.confidence)
+            try:
+                batch_predictions = predict_batch(model, batch_frames, args.img_size, device, args.confidence)
+            except RuntimeError as exc:
+                cuda_error = True
+                cuda_error_message = str(exc)
+                print(f'⚠ CUDA/runtime error in {sequence_name} {camera} after {total_frames} frames: {exc}')
+                break
 
             for frame, (pose_count, first_pose) in zip(batch_frames, batch_predictions):
                 total_frames += 1
@@ -194,13 +194,22 @@ def process_sequence_camera(model, folder, subfolder, camera, args, device):
         'not_detected_frames': not_detected_frames,
         'total_pose_instances': total_pose_instances,
         'detection_rate': float(detected_frames / total_frames) if total_frames > 0 else 0.0,
+        'cuda_error': cuda_error,
+        'cuda_error_message': cuda_error_message,
     }
 
-    print(
-        f"✓ {sequence_name} {camera}: "
-        f"detected={detected_frames}, not_detected={not_detected_frames}, "
-        f"pose_instances={total_pose_instances}"
-    )
+    if cuda_error:
+        print(
+            f"⚠ {sequence_name} {camera}: "
+            f"detected={detected_frames}, not_detected={not_detected_frames}, "
+            f"pose_instances={total_pose_instances}, stopped_due_to_cuda_error=True"
+        )
+    else:
+        print(
+            f"✓ {sequence_name} {camera}: "
+            f"detected={detected_frames}, not_detected={not_detected_frames}, "
+            f"pose_instances={total_pose_instances}"
+        )
     return summary
 
 
@@ -298,7 +307,12 @@ def process_all_uco_sequences(model, args, device):
             print(f'  -> Subfolder {folder:02d}/{subfolder:02d} start')
             for camera in args.cameras:
                 print(f'     -> Camera {camera} start')
-                result = process_sequence_camera(model, folder, subfolder, camera, args, device)
+                try:
+                    result = process_sequence_camera(model, folder, subfolder, camera, args, device)
+                except Exception as exc:
+                    print(f'     ! Camera {camera} failed with error: {exc}')
+                    continue
+
                 if result is None:
                     print(f'     <- Camera {camera} skipped or failed')
                     continue
@@ -336,8 +350,6 @@ def process_all_uco_sequences(model, args, device):
                 if totals['total_frames'] > 0:
                     totals['detection_rate'] = totals['detected_frames'] / totals['total_frames']
 
-                if device.startswith('cuda'):
-                    safe_empty_cache()
                 gc.collect()
 
                 print(f'     <- Camera {camera} done')
@@ -407,8 +419,6 @@ def main():
     try:
         process_all_uco_sequences(model, args, device)
     finally:
-        if gpu_available:
-            safe_empty_cache()
         gc.collect()
 
 

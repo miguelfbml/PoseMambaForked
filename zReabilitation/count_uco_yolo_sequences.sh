@@ -10,11 +10,14 @@
 echo "Running YOLO pose counting across UCO videos"
 echo "Folders: 0-26 | Subfolders: 09-16 | Cameras: cam0-cam4"
 
+export CUDA_LAUNCH_BLOCKING=1
+echo "CUDA_LAUNCH_BLOCKING=$CUDA_LAUNCH_BLOCKING"
+
 python3 count_uco_yolo_sequences.py \
     --model-path "weights/YOLO/best.pt" \
     --output-dir "uco_yolo_sequence_output" \
     --img-size "640" \
-    --batch-size "32" \
+    --batch-size "4" \
     --confidence "0.35" \
     --device "cuda:0" \
     --no-save-videos \

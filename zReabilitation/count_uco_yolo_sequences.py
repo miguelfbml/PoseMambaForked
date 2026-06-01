@@ -362,6 +362,8 @@ def process_all_uco_sequences(model, args, device):
     }
 
     for folder in FOLDER_RANGE:
+        print(f'\n--- Subject {folder:02d} start ---')
+        subject_processed = 0
         for subfolder in SUBFOLDER_RANGE:
             for camera in args.cameras:
                 result = process_sequence_camera(model, folder, subfolder, camera, args, device)
@@ -369,6 +371,7 @@ def process_all_uco_sequences(model, args, device):
                     continue
 
                 sequence_results.append(result)
+                subject_processed += 1
 
                 sequence_name = result['sequence']
                 if sequence_name not in sequence_totals:
@@ -403,6 +406,8 @@ def process_all_uco_sequences(model, args, device):
                 if device.startswith('cuda'):
                     torch.cuda.empty_cache()
                 gc.collect()
+
+        print(f'--- Subject {folder:02d} done ({subject_processed} sequence-camera runs) ---')
 
     print_summary(sequence_results, sequence_totals, camera_totals)
     save_summary_json(sequence_results, sequence_totals, camera_totals, args)

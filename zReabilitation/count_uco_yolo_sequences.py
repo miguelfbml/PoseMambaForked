@@ -2,8 +2,8 @@
 Process UCO videos with YOLO pose estimation and count detected vs undetected frames.
 
 The script walks folders 0-26 and subfolders 09-16 by default, processes all cameras
-unless a subset is provided, optionally saves an annotated mp4 for every processed
-video, and prints/saves summary counts per sequence and per camera.
+unless a subset is provided, optionally saves the raw mp4 for every processed video,
+and prints/saves summary counts per sequence and per camera.
 
 Example:
 python count_uco_yolo_sequences.py \
@@ -25,7 +25,7 @@ from ultralytics import YOLO
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
-from compare_gt_yolo_2d import CONNECTIONS_2D, check_gpu_availability  # noqa: E402
+from compare_gt_yolo_2d import check_gpu_availability  # noqa: E402
 
 
 UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/dataset/clips_mp4'
@@ -54,77 +54,6 @@ def load_video_capture(video_path):
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
     return cap, fps, width, height
-
-
-def draw_pose_overlay(frame, pose, title, detection_count, status_text):
-    output = frame.copy()
-
-    cv2.putText(
-        output,
-        title,
-        (20, 35),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.0,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        output,
-        f'{status_text} | poses: {detection_count}',
-        (20, 70),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (0, 255, 0) if detection_count > 0 else (0, 0, 255),
-        2,
-        cv2.LINE_AA,
-    )
-
-    if pose is None or np.allclose(pose, 0.0):
-        cv2.putText(
-            output,
-            'No YOLO detection',
-            (20, 105),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0, 0, 255),
-            2,
-            cv2.LINE_AA,
-        )
-        return output
-
-    for joint1, joint2 in CONNECTIONS_2D:
-        if joint1 < len(pose) and joint2 < len(pose):
-            p1 = pose[joint1]
-            p2 = pose[joint2]
-            if np.allclose(p1, 0.0) or np.allclose(p2, 0.0):
-                continue
-            cv2.line(
-                output,
-                (int(round(p1[0])), int(round(p1[1]))),
-                (int(round(p2[0])), int(round(p2[1]))),
-                (0, 180, 255),
-                2,
-                cv2.LINE_AA,
-            )
-
-    for joint_idx, joint_xy in enumerate(pose):
-        if np.allclose(joint_xy, 0.0):
-            continue
-        center = (int(round(joint_xy[0])), int(round(joint_xy[1])))
-        cv2.circle(output, center, 4, (0, 255, 255), -1, cv2.LINE_AA)
-        cv2.putText(
-            output,
-            str(joint_idx),
-            (center[0] + 5, center[1] - 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.4,
-            (255, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
-    return output
 
 
 def format_ratio(numerator, denominator):
@@ -237,15 +166,8 @@ def process_sequence_camera(model, folder, subfolder, camera, args, device):
                     not_detected_frames += 1
                     status_text = 'NOT DETECTED'
 
-                annotated_frame = draw_pose_overlay(
-                    frame,
-                    first_pose,
-                    f'UCO {sequence_name} {camera}',
-                    pose_count,
-                    status_text,
-                )
                 if writer is not None:
-                    writer.write(annotated_frame)
+                    writer.write(frame)
 
     finally:
         cap.release()

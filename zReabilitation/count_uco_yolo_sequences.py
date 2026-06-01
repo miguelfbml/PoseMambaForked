@@ -127,6 +127,12 @@ def draw_pose_overlay(frame, pose, title, detection_count, status_text):
     return output
 
 
+def format_ratio(numerator, denominator):
+    if denominator <= 0:
+        return '0/0'
+    return f'{numerator}/{denominator}'
+
+
 def predict_batch(model, frames, img_size, device, confidence):
     results = model.predict(
         frames,
@@ -265,31 +271,48 @@ def print_summary(sequence_results, sequence_totals, camera_totals):
     print('UCO YOLO detection summary')
     print('=' * 80)
 
-    print(f"{'Sequence':<12} {'Camera':<8} {'Total':<8} {'Detected':<10} {'Missing':<10} {'Pose inst.':<12}")
+    print(f"{'Subfolder':<12} {'Camera':<8} {'Frames':<8} {'Detected':<10} {'Missing':<10} {'Poses':<10} {'Poses/Frames':<13}")
     print('-' * 80)
     for result in sequence_results:
         print(
             f"{result['sequence']:<12} {result['camera']:<8} {result['total_frames']:<8} "
-            f"{result['detected_frames']:<10} {result['not_detected_frames']:<10} {result['total_pose_instances']:<12}"
+            f"{result['detected_frames']:<10} {result['not_detected_frames']:<10} "
+            f"{result['total_pose_instances']:<10} {format_ratio(result['total_pose_instances'], result['total_frames']):<13}"
         )
 
-    print('\nPer-sequence totals')
-    print(f"{'Sequence':<12} {'Total':<10} {'Detected':<10} {'Missing':<10} {'Pose inst.':<12} {'Rate':<10}")
+    print('\nPer-subfolder totals across cameras')
+    print(f"{'Subfolder':<12} {'Frames':<10} {'Detected':<10} {'Missing':<10} {'Poses':<10} {'Poses/Frames':<13} {'Rate':<10}")
     print('-' * 70)
     for sequence_name, totals in sequence_totals.items():
         print(
             f"{sequence_name:<12} {totals['total_frames']:<10} {totals['detected_frames']:<10} "
-            f"{totals['not_detected_frames']:<10} {totals['total_pose_instances']:<12} {totals['detection_rate'] * 100:>7.2f}%"
+            f"{totals['not_detected_frames']:<10} {totals['total_pose_instances']:<10} "
+            f"{format_ratio(totals['total_pose_instances'], totals['total_frames']):<13} {totals['detection_rate'] * 100:>7.2f}%"
         )
 
     print('\nPer-camera totals')
-    print(f"{'Camera':<8} {'Total':<10} {'Detected':<10} {'Missing':<10} {'Pose inst.':<12} {'Rate':<10}")
+    print(f"{'Camera':<8} {'Frames':<10} {'Detected':<10} {'Missing':<10} {'Poses':<10} {'Poses/Frames':<13} {'Rate':<10}")
     print('-' * 70)
     for camera, totals in camera_totals.items():
         print(
             f"{camera:<8} {totals['total_frames']:<10} {totals['detected_frames']:<10} "
-            f"{totals['not_detected_frames']:<10} {totals['total_pose_instances']:<12} {totals['detection_rate'] * 100:>7.2f}%"
+            f"{totals['not_detected_frames']:<10} {totals['total_pose_instances']:<10} "
+            f"{format_ratio(totals['total_pose_instances'], totals['total_frames']):<13} {totals['detection_rate'] * 100:>7.2f}%"
         )
+
+    overall_frames = sum(totals['total_frames'] for totals in camera_totals.values())
+    overall_detected = sum(totals['detected_frames'] for totals in camera_totals.values())
+    overall_missing = sum(totals['not_detected_frames'] for totals in camera_totals.values())
+    overall_poses = sum(totals['total_pose_instances'] for totals in camera_totals.values())
+    overall_rate = (overall_detected / overall_frames) if overall_frames > 0 else 0.0
+
+    print('\nOverall totals across all cameras')
+    print(f"Frames: {overall_frames}")
+    print(f"Detected frames: {overall_detected}")
+    print(f"Not detected frames: {overall_missing}")
+    print(f"Poses: {overall_poses}")
+    print(f"Poses/Frames: {format_ratio(overall_poses, overall_frames)}")
+    print(f"Detection rate: {overall_rate * 100:.2f}%")
     print('=' * 80)
 
 

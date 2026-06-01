@@ -13,6 +13,8 @@ echo "Folders: 0-26 | Subfolders: 09-16 | Cameras: cam0-cam4"
 export CUDA_LAUNCH_BLOCKING=1
 echo "CUDA_LAUNCH_BLOCKING=$CUDA_LAUNCH_BLOCKING"
 
+export TORCH_USE_CUDA_DSA=1
+
 python3 count_uco_yolo_sequences.py \
     --model-path "weights/YOLO/best.pt" \
     --output-dir "uco_yolo_sequence_output" \

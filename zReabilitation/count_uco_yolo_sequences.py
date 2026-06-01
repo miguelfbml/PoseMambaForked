@@ -63,31 +63,34 @@ def format_ratio(numerator, denominator):
 
 
 def predict_batch(model, frames, img_size, device, confidence):
-    results = model.predict(
-        frames,
-        verbose=False,
-        imgsz=img_size,
-        conf=confidence,
-        device=device,
-    )
+    if not frames:
+        return []
+
+    with torch.inference_mode():
+        results = model.predict(
+            frames,
+            verbose=False,
+            imgsz=img_size,
+            conf=confidence,
+            device=device,
+            batch=len(frames),
+        )
 
     batch_predictions = []
     for result in results:
         pose_count = 0
         first_pose = None
 
-        if (
-            hasattr(result, 'keypoints')
-            and result.keypoints is not None
-            and result.keypoints.xy is not None
-        ):
-            pose_tensor = result.keypoints.xy
+        keypoints = getattr(result, 'keypoints', None)
+        if keypoints is not None and getattr(keypoints, 'xy', None) is not None:
+            pose_tensor = keypoints.xy
             pose_count = int(len(pose_tensor))
             if pose_count > 0:
                 first_pose = pose_tensor[0].cpu().numpy()
 
         batch_predictions.append((pose_count, first_pose))
 
+    del results
     return batch_predictions
 
 

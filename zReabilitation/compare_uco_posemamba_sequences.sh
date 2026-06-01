@@ -18,7 +18,7 @@ echo "CUDA_LAUNCH_BLOCKING=$CUDA_LAUNCH_BLOCKING"
 
 export TORCH_USE_CUDA_DSA=1
 
-python3 compare_uco_posemamba_sequences.py \
+python3 "$SCRIPT_DIR/compare_uco_posemamba_sequences.py" \
     --yolo-model "../zdemo/weights/yolo/best.pt" \
     --posemamba-config "../configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "../zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \

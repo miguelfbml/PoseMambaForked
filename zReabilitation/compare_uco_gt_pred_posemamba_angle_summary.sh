@@ -14,7 +14,7 @@ python3 compare_uco_gt_pred_posemamba_angle_summary.py \
     --yolo-model "../zdemo/weights/yolo/best.pt" \
     --posemamba-config "../configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "../zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \
-    --output-file "uco_angle_summary.txt" \
+    --report-file "uco_angle_summary.txt" \
     --img-size "640" \
     --batch-size "16" \
     --device "cuda:0" \

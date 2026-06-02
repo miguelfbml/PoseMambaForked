@@ -10,8 +10,7 @@
 echo "Running UCO PoseMamba sequence rendering"
 echo "Folders: 0-5 | Subfolders: 09-16 | Cameras: cam0-cam4"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+ls
 
 export CUDA_LAUNCH_BLOCKING=1
 echo "CUDA_LAUNCH_BLOCKING=$CUDA_LAUNCH_BLOCKING"

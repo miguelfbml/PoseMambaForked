@@ -2,7 +2,7 @@
 #
 #SBATCH --partition=gpu_min32gb     # Reserved partition
 #SBATCH --qos=gpu_min32gb           # QoS level. Must match the partition name. External users must add the suffix "_ext".
-#SBATCH --job-name=compareUcoPosemamba
+#SBATCH --job-name=comparePosemamba
 #SBATCH --output=slurm_%x.%j.out    # File containing STDOUT output
 #SBATCH --error=slurm_%x.%j.err     # File containing STDERR output. If ommited, use STDOUT.
 
@@ -18,7 +18,7 @@ echo "CUDA_LAUNCH_BLOCKING=$CUDA_LAUNCH_BLOCKING"
 
 export TORCH_USE_CUDA_DSA=1
 
-python3 compare_uco_posemamba_sequences.py \
+python3 compare_posemamba.py \
     --yolo-model "../zdemo/weights/yolo/best.pt" \
     --posemamba-config "../configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml" \
     --posemamba-checkpoint "../zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin" \

@@ -14,8 +14,13 @@ YOLO_MODEL="../zdemo/weights/yolo/best.pt"
 POSEMAMBA_CONFIG="../configs/pose3d/testing/notestaug/PoseMamba_train_3dhp_S_5.yaml"
 POSEMAMBA_CHECKPOINT="../zdemo/weights/PoseMamba/ModelS/best_epoch_5.bin"
 OUTPUT_DIR="uco_gt_pred_selected_frames"
+SUMMARY_TXT="${OUTPUT_DIR}/sequence_angle_errors.txt"
 CAMERAS=("cam0" "cam1" "cam2" "cam3" "cam4")
 FRAMES=(0 30 60 90 120 150 180 210 240 270)
+
+mkdir -p "$OUTPUT_DIR"
+: > "$SUMMARY_TXT"
+echo "sequence,camera,mean_angle_error_deg,valid_angle_frames" >> "$SUMMARY_TXT"
 
 declare -A CAMERA_ERROR_SUM
 declare -A CAMERA_ERROR_COUNT
@@ -52,6 +57,8 @@ for camera in "${CAMERAS[@]}"; do
             valid_frames=$(printf '%s\n' "$result_line" | sed -n 's/.*valid_angle_frames=\([^ ]*\).*/\1/p')
 
             if [ -n "$mean_value" ] && [ "$mean_value" != "nan" ] && [ -n "$valid_frames" ] && [ "$valid_frames" -gt 0 ]; then
+                echo "${sequence},${camera},${mean_value},${valid_frames}" >> "$SUMMARY_TXT"
+
                 camera_sum_key="$camera"
                 exercise_sum_key="$subf"
 

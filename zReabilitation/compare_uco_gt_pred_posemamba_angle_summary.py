@@ -707,11 +707,11 @@ def main():
     results = []
     try:
         for folder in args.folders:
-            print(f'--- Folder {folder:02d} ---')
+            print(f'\n--- Subject {folder:02d} start ---')
             for subfolder in args.subfolders:
-                print(f'  -> Subfolder {folder:02d}/{subfolder:02d}')
+                print(f'  -> Subfolder {folder:02d}/{subfolder:02d} start')
                 for camera in args.cameras:
-                    print(f'     -> Camera {camera}')
+                    print(f'     -> Camera {camera} start')
                     try:
                         result = process_sequence_camera(
                             yolo_model,
@@ -740,7 +740,13 @@ def main():
                             f"(gt={result['mean_gt_angle']:.3f}, pred={result['mean_pred_angle']:.3f})"
                         )
                     else:
-                        print(f"     ! status={result['status']}")
+                        print(f"     ! Camera {camera} failed with status={result['status']}")
+
+                    print(f'     <- Camera {camera} done')
+
+                print(f'  <- Subfolder {folder:02d}/{subfolder:02d} done')
+
+            print(f'--- Subject {folder:02d} done ---')
 
         write_report(args.report_file, results, args)
         print(f'✓ Report written to {args.report_file}')

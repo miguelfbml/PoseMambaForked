@@ -61,7 +61,6 @@ from zReabilitation.comparePose import (  # noqa: E402
     plot_3d_skeleton,
     predict_posemamba_window,
     prepare_pose_for_plot,
-    render_pose_panel,
     scale_pose_to_max,
 )
 from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
@@ -194,6 +193,46 @@ def load_uco_gt_3d(gt_path, expected_joints=17):
     if not poses:
         return None
     return np.asarray(poses, dtype=np.float32)
+
+
+def render_pose_panel(
+    pose_3d,
+    width,
+    height,
+    sequence_name,
+    frame_idx,
+    panel_title,
+    line_color,
+    point_color,
+    missing_text,
+):
+    pose_plot = prepare_pose_for_plot(pose_3d)
+
+    fig = plt.figure(figsize=(max(width, 1) / 100.0, max(height, 1) / 100.0), dpi=100)
+    ax = fig.add_subplot(111, projection='3d')
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#fcfcfc')
+
+    ax.set_xlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_ylim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_zlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+
+    plot_3d_skeleton(
+        ax,
+        pose_plot,
+        panel_title,
+        line_color=line_color,
+        point_color=point_color,
+        missing_text=missing_text,
+        show_dots=True,
+    )
+
+    fig.suptitle(f'{sequence_name} | Frame {frame_idx}', fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.canvas.draw()
+    image = np.asarray(fig.canvas.buffer_rgba())[:, :, :3].copy()
+    plt.close(fig)
+    return image
 
 
 def compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, frame_idx):

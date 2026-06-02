@@ -60,6 +60,7 @@ from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
 DEFAULT_FOLDERS = list(range(0, 27))
 DEFAULT_SUBFOLDERS = list(range(9, 17))
 DEFAULT_REPORT_FILE = 'uco_angle_error_report.txt'
+DEFAULT_GT_3D_FILE = ''
 UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/dataset/clips_mp4'
 
 

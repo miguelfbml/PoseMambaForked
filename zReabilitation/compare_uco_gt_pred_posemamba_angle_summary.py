@@ -48,16 +48,11 @@ from zReabilitation.comparePose import (  # noqa: E402
     DEFAULT_YOLO_MODEL_PATH,
     build_window_indices,
     check_gpu_availability,
-    compute_joint_angle_degrees,
-    get_prediction_angle_triplet,
     load_posemamba_model,
-    load_uco_gt_3d,
-    load_uco_video_path,
     load_video_frames,
     prepare_pose_for_plot,
     prepare_uco_gt_for_plot,
     predict_posemamba_window,
-    resolve_uco_gt_3d_path,
 )
 from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
 
@@ -65,6 +60,99 @@ from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
 DEFAULT_FOLDERS = list(range(0, 27))
 DEFAULT_SUBFOLDERS = list(range(9, 17))
 DEFAULT_REPORT_FILE = 'uco_angle_error_report.txt'
+UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/dataset/clips_mp4'
+
+
+def compute_joint_angle_degrees(pose_3d, joint_a, joint_b, joint_c):
+    if pose_3d is None:
+        return None
+
+    max_joint_idx = max(joint_a, joint_b, joint_c)
+    if pose_3d.shape[0] <= max_joint_idx:
+        return None
+
+    vec_ab = pose_3d[joint_a] - pose_3d[joint_b]
+    vec_cb = pose_3d[joint_c] - pose_3d[joint_b]
+    norm_ab = float(np.linalg.norm(vec_ab))
+    norm_cb = float(np.linalg.norm(vec_cb))
+    if norm_ab < 1e-6 or norm_cb < 1e-6:
+        return None
+
+    cos_angle = float(np.dot(vec_ab, vec_cb) / (norm_ab * norm_cb))
+    cos_angle = float(np.clip(cos_angle, -1.0, 1.0))
+    return float(np.degrees(np.arccos(cos_angle)))
+
+
+def get_prediction_angle_triplet(subfolder_idx):
+    if 9 <= subfolder_idx <= 12:
+        return (5, 6, 7), '5-6-7'
+    if 13 <= subfolder_idx <= 16:
+        return (2, 3, 4), '2-3-4'
+    return None, None
+
+
+def load_uco_video_path(folder, subfolder, camera):
+    return os.path.join(UCO_DATASET_PATH, str(folder), f'{subfolder:02d}', f'{camera}.mp4')
+
+
+def resolve_uco_gt_3d_path(folder, subfolder, camera, explicit_path=''):
+    candidates = []
+    if explicit_path:
+        candidates.append(explicit_path)
+
+    base_dir = os.path.join(UCO_DATASET_PATH, str(folder), f'{subfolder:02d}')
+    candidates.extend([
+        os.path.join(base_dir, f'{camera}_p3d.txt'),
+        os.path.join(base_dir, 'p3d.txt'),
+        os.path.join(base_dir, f'{camera}.p3d.txt'),
+        os.path.join(base_dir, camera, 'p3d.txt'),
+        os.path.join(base_dir, camera, f'{camera}_p3d.txt'),
+    ])
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return candidates[0] if candidates else None
+
+
+def load_uco_gt_3d(gt_path, expected_joints=17):
+    if not gt_path or not os.path.exists(gt_path):
+        return None
+
+    poses = []
+    try:
+        with open(gt_path, 'r', encoding='utf-8') as handle:
+            for line_idx, line in enumerate(handle):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                try:
+                    values = [float(value) for value in line.split()]
+                except ValueError:
+                    print(f'⚠ Skipping GT line {line_idx}: contains non-numeric values')
+                    continue
+
+                if len(values) < 3 or len(values) % 3 != 0:
+                    print(f'⚠ Skipping GT line {line_idx}: expected a multiple of 3 values, got {len(values)}')
+                    continue
+
+                pose = np.asarray(values, dtype=np.float32).reshape(-1, 3)
+                if pose.shape[0] < expected_joints:
+                    padded_pose = np.zeros((expected_joints, 3), dtype=np.float32)
+                    padded_pose[:pose.shape[0]] = pose
+                    pose = padded_pose
+                elif pose.shape[0] > expected_joints:
+                    pose = pose[:expected_joints]
+
+                poses.append(pose)
+    except Exception as exc:
+        print(f'❌ Error loading GT 3D file {gt_path}: {exc}')
+        return None
+
+    if not poses:
+        return None
+    return np.asarray(poses, dtype=np.float32)
 
 
 def format_mean(values):

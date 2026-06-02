@@ -29,8 +29,82 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --batch-size "16" \
     --device "cuda:0"
 
+
 python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --sequence "0/10" \
+    --camera "$CAMERA" \
+    --frames "${FRAMES[@]}" \
+    --yolo-model "$YOLO_MODEL" \
+    --posemamba-config "$POSEMAMBA_CONFIG" \
+    --posemamba-checkpoint "$POSEMAMBA_CHECKPOINT" \
+    --output-dir "$OUTPUT_DIR" \
+    --img-size "640" \
+    --batch-size "16" \
+    --device "cuda:0"
+
+python3 compare_uco_gt_pred_posemamba_selected_frames.py \
+    --sequence "0/11" \
+    --camera "$CAMERA" \
+    --frames "${FRAMES[@]}" \
+    --yolo-model "$YOLO_MODEL" \
+    --posemamba-config "$POSEMAMBA_CONFIG" \
+    --posemamba-checkpoint "$POSEMAMBA_CHECKPOINT" \
+    --output-dir "$OUTPUT_DIR" \
+    --img-size "640" \
+    --batch-size "16" \
+    --device "cuda:0"
+
+
+python3 compare_uco_gt_pred_posemamba_selected_frames.py \
+    --sequence "0/12" \
+    --camera "$CAMERA" \
+    --frames "${FRAMES[@]}" \
+    --yolo-model "$YOLO_MODEL" \
+    --posemamba-config "$POSEMAMBA_CONFIG" \
+    --posemamba-checkpoint "$POSEMAMBA_CHECKPOINT" \
+    --output-dir "$OUTPUT_DIR" \
+    --img-size "640" \
+    --batch-size "16" \
+    --device "cuda:0"
+
+python3 compare_uco_gt_pred_posemamba_selected_frames.py \
+    --sequence "0/13" \
+    --camera "$CAMERA" \
+    --frames "${FRAMES[@]}" \
+    --yolo-model "$YOLO_MODEL" \
+    --posemamba-config "$POSEMAMBA_CONFIG" \
+    --posemamba-checkpoint "$POSEMAMBA_CHECKPOINT" \
+    --output-dir "$OUTPUT_DIR" \
+    --img-size "640" \
+    --batch-size "16" \
+    --device "cuda:0"
+
+python3 compare_uco_gt_pred_posemamba_selected_frames.py \
+    --sequence "0/14" \
+    --camera "$CAMERA" \
+    --frames "${FRAMES[@]}" \
+    --yolo-model "$YOLO_MODEL" \
+    --posemamba-config "$POSEMAMBA_CONFIG" \
+    --posemamba-checkpoint "$POSEMAMBA_CHECKPOINT" \
+    --output-dir "$OUTPUT_DIR" \
+    --img-size "640" \
+    --batch-size "16" \
+    --device "cuda:0"
+
+python3 compare_uco_gt_pred_posemamba_selected_frames.py \
+    --sequence "0/15" \
+    --camera "$CAMERA" \
+    --frames "${FRAMES[@]}" \
+    --yolo-model "$YOLO_MODEL" \
+    --posemamba-config "$POSEMAMBA_CONFIG" \
+    --posemamba-checkpoint "$POSEMAMBA_CHECKPOINT" \
+    --output-dir "$OUTPUT_DIR" \
+    --img-size "640" \
+    --batch-size "16" \
+    --device "cuda:0"
+
+python3 compare_uco_gt_pred_posemamba_selected_frames.py \
+    --sequence "0/16" \
     --camera "$CAMERA" \
     --frames "${FRAMES[@]}" \
     --yolo-model "$YOLO_MODEL" \

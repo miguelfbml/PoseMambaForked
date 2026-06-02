@@ -1,35 +1,38 @@
 """
-Compute mean 3D angle error between UCO ground-truth poses and PoseMamba
-predictions for every folder/subfolder/camera sequence.
+Render selected UCO rehabilitation frames with 3D ground truth overlaid on the
+frame image and PoseMamba 3D prediction on the right.
 
-This script does not save frames or videos. It walks the UCO dataset layout:
-folders 0-26, subfolders 09-16, cameras cam0-cam4 by default, computes the
-mean absolute angle difference per sequence, and writes a text summary file.
+This is the selected-frame counterpart to comparePose.py. It loads a UCO video
+for a given folder/subfolder/camera, runs YOLO + PoseMamba on the full video,
+then saves one comparison image per requested frame.
 
-Angle definitions:
-- Ground truth: joints 0-1-2
-- PoseMamba prediction:
-  - subfolders 09-12 -> joints 5-6-7
-  - subfolders 13-16 -> joints 2-3-4
+The left panel keeps the raw frame as the background and places a GT 3D inset
+on top of it. The right panel shows the PoseMamba 3D prediction using the same
+visualization path as the demo/comparePose pipeline.
 
 Example:
-python compare_uco_gt_pred_posemamba_angle_summary.py \
-    --output-file uco_angle_summary.txt \
-    --device cuda:0
+python compare_uco_gt_pred_posemamba_selected_frames.py \
+    --sequence "0/01" \
+    --camera cam0 \
+    --frames 0 30 60 90 \
+    --output-dir uco_gt_pred_selected_frames
 """
 
 import argparse
 import gc
+import json
 import os
 import sys
-import time
-from collections import defaultdict
 
 import cv2
+import matplotlib
 import numpy as np
 import torch
 import torch.nn as nn
 from ultralytics import YOLO
+
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt  # noqa: E402
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
@@ -45,120 +48,112 @@ if ZDEMO_DIR not in sys.path:
 from lib.utils.learning import load_backbone  # noqa: E402
 from lib.utils.tools import get_config  # noqa: E402
 from lib.utils.utils_data import flip_data  # noqa: E402
-
-
-DEFAULT_YOLO_MODEL_PATH = os.path.join(ZDEMO_DIR, 'weights', 'yolo', 'best.pt')
-DEFAULT_POSEMAMBA_CONFIG = os.path.join(
-    PROJECT_ROOT,
-    'configs',
-    'pose3d',
-    'testing',
-    'notestaug',
-    'PoseMamba_train_3dhp_S_5.yaml',
+from zReabilitation.comparePose import (  # noqa: E402
+    DEFAULT_COORD_RANGE,
+    DEFAULT_POSEMAMBA_CHECKPOINT,
+    DEFAULT_POSEMAMBA_CONFIG,
+    DEFAULT_YOLO_MODEL_PATH,
+    apply_upright_correction,
+    build_window_indices,
+    check_gpu_availability,
+    load_video_frames,
+    make_root_relative_3d,
+    normalize_screen_coordinates,
+    plot_3d_skeleton,
+    predict_posemamba_window,
+    prepare_pose_for_plot,
+    scale_pose_to_max,
 )
-DEFAULT_POSEMAMBA_CHECKPOINT = os.path.join(
-    ZDEMO_DIR,
-    'weights',
-    'PoseMamba',
-    'ModelS',
-    'best_epoch_5.bin',
-)
+from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
 
 
-DEFAULT_FOLDERS = list(range(0, 27))
-DEFAULT_SUBFOLDERS = list(range(9, 17))
+JOINT_NAMES = [
+    'Head', 'SpineShoulder', 'LShoulder', 'LElbow', 'LHand',
+    'RShoulder', 'RElbow', 'RHand', 'LHip', 'LKnee', 'LAnkle',
+    'RHip', 'RKnee', 'RAnkle', 'Sacrum', 'Spine', 'Neck',
+]
+
+CONNECTIONS_3D = [
+    (0, 16), (16, 1), (1, 2), (2, 3), (3, 4), (1, 5), (5, 6), (6, 7),
+    (1, 15), (15, 14), (14, 8), (8, 9), (9, 10), (14, 11), (11, 12), (12, 13),
+]
+
 DEFAULT_CAMERAS = ['cam0', 'cam1', 'cam2', 'cam3', 'cam4']
-DEFAULT_REPORT_FILE = 'uco_angle_error_report.txt'
 DEFAULT_GT_3D_FILE = ''
 UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/dataset/clips_mp4'
+GT_JOINT_NAMES = ['Shoulder', 'Elbow', 'Hand']
+GT_CONNECTIONS_3D = [(0, 1), (1, 2)]
 
 
-def check_gpu_availability():
-    gpu_available = torch.cuda.is_available()
-    if gpu_available:
-        current_device = torch.cuda.current_device()
-        return f'cuda:{current_device}', True
-    return 'cpu', False
+def compute_joint_angle_degrees(pose_3d, joint_a, joint_b, joint_c):
+    if pose_3d is None:
+        return None
+
+    max_joint_idx = max(joint_a, joint_b, joint_c)
+    if pose_3d.shape[0] <= max_joint_idx:
+        return None
+
+    vec_ab = pose_3d[joint_a] - pose_3d[joint_b]
+    vec_cb = pose_3d[joint_c] - pose_3d[joint_b]
+    norm_ab = float(np.linalg.norm(vec_ab))
+    norm_cb = float(np.linalg.norm(vec_cb))
+    if norm_ab < 1e-6 or norm_cb < 1e-6:
+        return None
+
+    cos_angle = float(np.dot(vec_ab, vec_cb) / (norm_ab * norm_cb))
+    cos_angle = float(np.clip(cos_angle, -1.0, 1.0))
+    return float(np.degrees(np.arccos(cos_angle)))
 
 
-def normalize_screen_coordinates(points, width, height):
-    assert points.shape[-1] == 2
-    return points / width * 2 - [1, height / width]
+def get_prediction_angle_triplet(subfolder_idx):
+    if 9 <= subfolder_idx <= 12:
+        return (5, 6, 7), '5-6-7'
+    if 13 <= subfolder_idx <= 16:
+        return (2, 3, 4), '2-3-4'
+    return None, None
 
 
-def apply_upright_correction(poses_3d):
-    rotation_x_90 = np.array([
-        [1, 0, 0],
-        [0, 0, 1],
-        [0, -1, 0],
-    ], dtype=np.float32)
-    rotation_z_90 = np.array([
-        [0, -1, 0],
-        [1, 0, 0],
-        [0, 0, 1],
-    ], dtype=np.float32)
-    theta = np.deg2rad(45)
-    rotation_z_45 = np.array([
-        [np.cos(theta), -np.sin(theta), 0],
-        [np.sin(theta), np.cos(theta), 0],
-        [0, 0, 1],
-    ], dtype=np.float32)
-    return poses_3d @ rotation_x_90.T @ rotation_z_90.T @ rotation_z_45.T
+def draw_text_block(image, lines, origin=(20, 20), background_color=(0, 0, 0), background_alpha=0.55):
+    if not lines:
+        return image
 
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    thickness = 2
+    line_gap = 8
+    padding_x = 12
+    padding_y = 10
 
-def make_root_relative_3d(poses_3d, root_joint_idx=14):
-    root_pos = poses_3d[root_joint_idx]
-    root_relative_poses = poses_3d - root_pos[np.newaxis, :]
-    root_relative_poses[root_joint_idx] = [0.0, 0.0, 0.0]
-    return root_relative_poses
+    text_sizes = [cv2.getTextSize(line, font, font_scale, thickness)[0] for line in lines]
+    text_width = max((size[0] for size in text_sizes), default=0)
+    text_height = sum(size[1] for size in text_sizes) + line_gap * max(len(lines) - 1, 0)
 
+    x0, y0 = origin
+    box_w = text_width + padding_x * 2
+    box_h = text_height + padding_y * 2
+    x0 = max(0, min(x0, image.shape[1] - box_w - 1))
+    y0 = max(0, min(y0, image.shape[0] - box_h - 1))
 
-def scale_pose_to_max(pose_3d, max_value=900):
-    max_coord = np.max(np.abs(pose_3d))
-    if max_coord < 1e-6:
-        return pose_3d
-    return pose_3d * (max_value / max_coord)
+    overlay = image.copy()
+    cv2.rectangle(overlay, (x0, y0), (x0 + box_w, y0 + box_h), background_color, -1)
+    image = cv2.addWeighted(overlay, background_alpha, image, 1.0 - background_alpha, 0.0)
 
+    cursor_y = y0 + padding_y
+    for line, size in zip(lines, text_sizes):
+        cursor_y += size[1]
+        cv2.putText(
+            image,
+            line,
+            (x0 + padding_x, cursor_y),
+            font,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
+        cursor_y += line_gap
 
-def build_window_indices(center_idx, total_frames, window_size):
-    half_window = window_size // 2
-    indices = []
-    for offset in range(-half_window, half_window + 1):
-        index = center_idx + offset
-        index = max(0, min(total_frames - 1, index))
-        indices.append(index)
-    return indices
-
-
-def load_video_frames(video_path):
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return None, 0.0, 0, 0
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps is None or fps <= 0:
-        fps = 30.0
-
-    frames = []
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-    if width <= 0 or height <= 0:
-        ret, frame = cap.read()
-        if not ret or frame is None:
-            cap.release()
-            return None, fps, 0, 0
-        height, width = frame.shape[:2]
-        frames.append(frame)
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        frames.append(frame)
-
-    cap.release()
-    return frames, fps, width, height
+    return image
 
 
 def load_posemamba_model(config_path, checkpoint_path, device):
@@ -208,111 +203,6 @@ def predict_posemamba_window(model, posemamba_config, poses_2d_window, frame_sha
     middle_idx = len(poses_2d_window) // 2
     pred_3d_middle = pred_3d[0, middle_idx].detach().cpu().numpy()
     return pred_3d_middle
-
-
-def prepare_pose_for_plot(pose_3d):
-    if pose_3d is None:
-        return None
-
-    post_out = pose_3d.copy().astype(np.float32)
-    post_out = apply_upright_correction(post_out)
-    post_out = make_root_relative_3d(post_out)
-    post_out = scale_pose_to_max(post_out)
-    return post_out
-
-
-def estimate_yolo_poses(model, frames, img_size=640, device='cpu', batch_size=None):
-    yolo_poses = []
-    confidences = []
-    inference_times = []
-
-    if batch_size is None:
-        batch_size = 32 if device.startswith('cuda') else 16
-
-    for start_idx in range(0, len(frames), batch_size):
-        batch_frames = frames[start_idx:start_idx + batch_size]
-
-        for frame in batch_frames:
-            try:
-                start_time = time.time()
-                results = model.predict(frame, verbose=False, imgsz=img_size, conf=0.65, device=device)
-                inference_times.append(time.time() - start_time)
-
-                if (
-                    results and len(results) > 0 and
-                    hasattr(results[0], 'keypoints') and
-                    results[0].keypoints is not None and
-                    len(results[0].keypoints.xy) > 0
-                ):
-                    keypoints = results[0].keypoints.xy[0].cpu().numpy()
-                    conf = results[0].keypoints.conf[0].cpu().numpy() if results[0].keypoints.conf is not None else np.ones(17)
-
-                    if keypoints.shape[0] == 17:
-                        yolo_poses.append(keypoints)
-                        confidences.append(conf)
-                    else:
-                        padded_kpts = np.zeros((17, 2))
-                        padded_conf = np.zeros(17)
-                        n_kpts = min(17, keypoints.shape[0])
-                        padded_kpts[:n_kpts] = keypoints[:n_kpts]
-                        padded_conf[:n_kpts] = conf[:n_kpts] if len(conf) > 0 else 0.5
-                        yolo_poses.append(padded_kpts)
-                        confidences.append(padded_conf)
-                else:
-                    yolo_poses.append(np.zeros((17, 2)))
-                    confidences.append(np.zeros(17))
-            except Exception as exc:
-                print(f'Error in YOLO inference: {exc}')
-                yolo_poses.append(np.zeros((17, 2)))
-                confidences.append(np.zeros(17))
-                inference_times.append(0.0)
-
-        if device.startswith('cuda'):
-            torch.cuda.empty_cache()
-        gc.collect()
-
-    yolo_poses = np.asarray(yolo_poses, dtype=np.float32)
-    confidences = np.asarray(confidences, dtype=np.float32)
-    total_inference_time = float(sum(inference_times))
-    mean_inference_time = float(np.mean(inference_times)) if inference_times else 0.0
-    fps = 1.0 / mean_inference_time if mean_inference_time > 0 else 0.0
-
-    performance_metrics = {
-        'total_inference_time': total_inference_time,
-        'mean_inference_time': mean_inference_time,
-        'fps': fps,
-        'processed_frames': len(frames),
-    }
-
-    return yolo_poses, confidences, performance_metrics
-
-
-def compute_joint_angle_degrees(pose_3d, joint_a, joint_b, joint_c):
-    if pose_3d is None:
-        return None
-
-    max_joint_idx = max(joint_a, joint_b, joint_c)
-    if pose_3d.shape[0] <= max_joint_idx:
-        return None
-
-    vec_ab = pose_3d[joint_a] - pose_3d[joint_b]
-    vec_cb = pose_3d[joint_c] - pose_3d[joint_b]
-    norm_ab = float(np.linalg.norm(vec_ab))
-    norm_cb = float(np.linalg.norm(vec_cb))
-    if norm_ab < 1e-6 or norm_cb < 1e-6:
-        return None
-
-    cos_angle = float(np.dot(vec_ab, vec_cb) / (norm_ab * norm_cb))
-    cos_angle = float(np.clip(cos_angle, -1.0, 1.0))
-    return float(np.degrees(np.arccos(cos_angle)))
-
-
-def get_prediction_angle_triplet(subfolder_idx):
-    if 9 <= subfolder_idx <= 12:
-        return (5, 6, 7), '5-6-7'
-    if 13 <= subfolder_idx <= 16:
-        return (2, 3, 4), '2-3-4'
-    return None, None
 
 
 def load_uco_video_path(folder, subfolder, camera):
@@ -385,284 +275,393 @@ def prepare_uco_gt_for_plot(pose_3d):
 
     pose_plot = np.asarray(pose_3d, dtype=np.float32).copy()
     pose_plot = pose_plot[:3]
-    pose_plot = pose_plot - pose_plot[0:1]
-    pose_plot = pose_plot[:3]
-
-    max_coord = np.max(np.abs(pose_plot))
-    if max_coord < 1e-6:
-        return pose_plot
-    return pose_plot * (900.0 / max_coord)
+    pose_plot = apply_upright_correction(pose_plot)
+    pose_plot = make_root_relative_3d(pose_plot, root_joint_idx=0)
+    pose_plot = scale_pose_to_max(pose_plot)
+    return pose_plot
 
 
-def format_mean(values):
-    if not values:
+def render_pose_panel(
+    pose_3d,
+    width,
+    height,
+    sequence_name,
+    frame_idx,
+    panel_title,
+    line_color,
+    point_color,
+    missing_text,
+):
+    pose_plot = prepare_pose_for_plot(pose_3d)
+
+    fig = plt.figure(figsize=(max(width, 1) / 100.0, max(height, 1) / 100.0), dpi=100)
+    ax = fig.add_subplot(111, projection='3d')
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#fcfcfc')
+
+    ax.set_xlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_ylim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_zlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+
+    plot_3d_skeleton(
+        ax,
+        pose_plot,
+        panel_title,
+        line_color=line_color,
+        point_color=point_color,
+        missing_text=missing_text,
+        show_dots=True,
+    )
+
+    fig.suptitle(f'{sequence_name} | Frame {frame_idx}', fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.canvas.draw()
+    image = np.asarray(fig.canvas.buffer_rgba())[:, :, :3].copy()
+    plt.close(fig)
+    return image
+
+
+def render_gt_panel(pose_3d, width, height, sequence_name, frame_idx):
+    pose_plot = prepare_uco_gt_for_plot(pose_3d)
+
+    fig = plt.figure(figsize=(max(width, 1) / 100.0, max(height, 1) / 100.0), dpi=100)
+    ax = fig.add_subplot(111, projection='3d')
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#fcfcfc')
+    ax.set_xlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_ylim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_zlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+
+    ax.set_title('Ground Truth 3D', fontsize=12)
+    ax.set_xlabel('X (right)', fontsize=10)
+    ax.set_ylabel('Y (forward)', fontsize=10)
+    ax.set_zlabel('Z (up)', fontsize=10)
+    ax.view_init(elev=15, azim=45)
+
+    if pose_plot is None or np.allclose(pose_plot, 0.0):
+        ax.text2D(0.10, 0.50, 'No GT Data', transform=ax.transAxes, fontsize=12, color='red')
+    else:
+        for joint1, joint2 in GT_CONNECTIONS_3D:
+            if joint1 < len(pose_plot) and joint2 < len(pose_plot):
+                p1 = pose_plot[joint1]
+                p2 = pose_plot[joint2]
+                ax.plot(
+                    [p1[0], p2[0]],
+                    [p1[1], p2[1]],
+                    [p1[2], p2[2]],
+                    color='royalblue',
+                    linewidth=2.5,
+                    alpha=0.85,
+                )
+
+        xs = pose_plot[:, 0]
+        ys = pose_plot[:, 1]
+        zs = pose_plot[:, 2]
+        ax.scatter(xs, ys, zs, c='deepskyblue', s=45, alpha=0.9, edgecolors='black', linewidth=0.4)
+        ax.scatter(
+            [pose_plot[0, 0]],
+            [pose_plot[0, 1]],
+            [pose_plot[0, 2]],
+            c='green',
+            s=140,
+            marker='*',
+            alpha=1.0,
+            edgecolors='darkgreen',
+            linewidth=1,
+        )
+
+        for joint_idx, (x, y, z) in enumerate(pose_plot):
+            joint_name = GT_JOINT_NAMES[joint_idx] if joint_idx < len(GT_JOINT_NAMES) else f'Joint_{joint_idx}'
+            del joint_name
+            ax.text(x + 18, y + 18, z + 18, f'{joint_idx}', fontsize=8, color='black')
+
+    fig.suptitle(f'{sequence_name} | Frame {frame_idx}', fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.canvas.draw()
+    image = np.asarray(fig.canvas.buffer_rgba())[:, :, :3].copy()
+    plt.close(fig)
+    return image
+
+
+def compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, frame_idx, angle_overlay_lines=None):
+    height, width = frame_bgr.shape[:2]
+    output = frame_bgr.copy()
+
+    inset_width = max(int(width * 0.42), 240)
+    inset_height = max(int(height * 0.42), 180)
+    inset_width = min(inset_width, width - 24)
+    inset_height = min(inset_height, height - 24)
+
+    inset = render_gt_panel(
+        gt_pose_3d,
+        inset_width,
+        inset_height,
+        sequence_name,
+        frame_idx,
+    )
+    inset_bgr = cv2.cvtColor(inset, cv2.COLOR_RGB2BGR)
+    inset_bgr = cv2.copyMakeBorder(inset_bgr, 6, 6, 6, 6, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+    inset_h, inset_w = inset_bgr.shape[:2]
+    margin = 12
+    if inset_w + margin * 2 > width or inset_h + margin * 2 > height:
+        scale = min((width - 2 * margin) / max(inset_w, 1), (height - 2 * margin) / max(inset_h, 1), 1.0)
+        inset_bgr = cv2.resize(
+            inset_bgr,
+            (max(int(inset_w * scale), 1), max(int(inset_h * scale), 1)),
+            interpolation=cv2.INTER_AREA,
+        )
+        inset_h, inset_w = inset_bgr.shape[:2]
+
+    y0 = margin
+    x0 = margin
+    y1 = min(y0 + inset_h, height)
+    x1 = min(x0 + inset_w, width)
+    output[y0:y1, x0:x1] = inset_bgr[: y1 - y0, : x1 - x0]
+
+    cv2.putText(
+        output,
+        'GT 3D overlay',
+        (20, height - 24),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    if angle_overlay_lines:
+        output = draw_text_block(output, angle_overlay_lines, origin=(width - 420, 20))
+
+    return output
+
+
+def compose_side_by_side(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx, angle_overlay_lines=None):
+    height, width = frame_bgr.shape[:2]
+    left_panel = compose_left_panel_with_gt_overlay(
+        frame_bgr,
+        gt_pose_3d,
+        sequence_name,
+        frame_idx,
+        angle_overlay_lines=angle_overlay_lines,
+    )
+    right_panel = render_pose_panel(
+        pred_pose_3d,
+        width,
+        height,
+        sequence_name,
+        frame_idx,
+        panel_title='PoseMamba Prediction',
+        line_color='tomato',
+        point_color='salmon',
+        missing_text='No Prediction',
+    )
+    right_panel_bgr = cv2.cvtColor(right_panel, cv2.COLOR_RGB2BGR)
+    separator = np.full((height, 8, 3), 255, dtype=np.uint8)
+    return np.concatenate([left_panel, separator, right_panel_bgr], axis=1)
+
+
+def save_frame_comparison(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx, output_dir, angle_overlay_lines=None):
+    output = compose_side_by_side(
+        frame_bgr,
+        gt_pose_3d,
+        pred_pose_3d,
+        sequence_name,
+        frame_idx,
+        angle_overlay_lines=angle_overlay_lines,
+    )
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f'frame_{frame_idx:06d}_gt_overlay_posemamba3d.png')
+    cv2.imwrite(output_path, output)
+    return output_path
+
+
+def process_selected_frames(sequence_name, frame_indices, args):
+    if '/' not in sequence_name:
+        print(f'❌ Expected UCO sequence in folder/subfolder format, got: {sequence_name}')
         return None
-    return float(np.mean(np.asarray(values, dtype=np.float32)))
 
-
-def format_std(values):
-    if not values:
+    folder, subfolder = sequence_name.split('/', 1)
+    try:
+        folder_idx = int(folder)
+        subfolder_idx = int(subfolder)
+    except ValueError:
+        print(f'❌ Invalid UCO sequence format: {sequence_name}')
         return None
-    return float(np.std(np.asarray(values, dtype=np.float32)))
 
-
-def process_sequence_camera(yolo_model, posemamba_model, posemamba_config, folder, subfolder, camera, args, device):
-    sequence_name = f'{folder}/{subfolder:02d}'
-    video_path = load_uco_video_path(folder, subfolder, camera)
+    video_path = load_uco_video_path(folder_idx, subfolder_idx, args.camera)
     if not os.path.exists(video_path):
-        return {
-            'sequence': sequence_name,
-            'folder': folder,
-            'subfolder': f'{subfolder:02d}',
-            'camera': camera,
-            'status': 'missing_video',
-        }
+        print(f'❌ Video file not found: {video_path}')
+        return None
 
-    gt_path = resolve_uco_gt_3d_path(folder, subfolder, camera, args.gt_3d_file)
+    gt_path = resolve_uco_gt_3d_path(folder_idx, subfolder_idx, args.camera, args.gt_3d_file)
     if not gt_path or not os.path.exists(gt_path):
-        return {
-            'sequence': sequence_name,
-            'folder': folder,
-            'subfolder': f'{subfolder:02d}',
-            'camera': camera,
-            'status': 'missing_gt',
-        }
+        print(f'❌ Ground-truth 3D file not found. Tried: {gt_path if gt_path else "<no candidate>"}')
+        return None
 
     frames, fps, width, height = load_video_frames(video_path)
     if not frames:
-        return {
-            'sequence': sequence_name,
-            'folder': folder,
-            'subfolder': f'{subfolder:02d}',
-            'camera': camera,
-            'status': 'failed_video_load',
-        }
+        print(f'❌ Failed to load frames from {video_path}')
+        return None
 
     gt_poses_3d = load_uco_gt_3d(gt_path)
     if gt_poses_3d is None:
-        return {
-            'sequence': sequence_name,
-            'folder': folder,
-            'subfolder': f'{subfolder:02d}',
-            'camera': camera,
-            'status': 'failed_gt_load',
-        }
+        print(f'❌ Failed to load ground-truth poses from {gt_path}')
+        return None
+
+    total_frames = min(len(frames), len(gt_poses_3d))
+    selected_indices = [frame_idx for frame_idx in frame_indices if 0 <= frame_idx < total_frames]
+    if not selected_indices:
+        print('❌ No valid frame indices were provided')
+        return None
+
+    print('\n' + '=' * 80)
+    print(f'▶ Starting sequence processing: {sequence_name} | {args.camera}')
+    print(f'Processing {sequence_name} | {args.camera}')
+    print(f'Video: {video_path}')
+    print(f'GT 3D: {gt_path}')
+    print(f'Frames: {len(frames)} | FPS: {fps:.2f} | Size: {width}x{height}')
+    print(f'Selected frames: {selected_indices}')
+    print('=' * 80)
 
     yolo_poses_2d, _, performance_metrics = estimate_yolo_poses(
-        yolo_model,
+        args.yolo_model_instance,
         frames,
         args.img_size,
-        device,
+        args.device_resolved,
         batch_size=args.batch_size,
     )
 
     if len(yolo_poses_2d) != len(frames):
-        return {
-            'sequence': sequence_name,
-            'folder': folder,
-            'subfolder': f'{subfolder:02d}',
-            'camera': camera,
-            'status': 'yolo_length_mismatch',
-        }
+        print(f'⚠ YOLO output length mismatch: {len(yolo_poses_2d)} vs {len(frames)}')
+        return None
 
-    pred_triplet, pred_triplet_label = get_prediction_angle_triplet(subfolder)
-    if pred_triplet is None:
-        return {
-            'sequence': sequence_name,
-            'folder': folder,
-            'subfolder': f'{subfolder:02d}',
-            'camera': camera,
-            'status': 'unsupported_subfolder',
-        }
+    output_sequence_dir = os.path.join(args.output_dir, str(folder_idx), f'{subfolder_idx:02d}', args.camera)
+    os.makedirs(output_sequence_dir, exist_ok=True)
 
-    gt_angles = []
-    pred_angles = []
-    abs_diffs = []
-    valid_frames = 0
+    pred_triplet, pred_triplet_label = get_prediction_angle_triplet(subfolder_idx)
+    if args.show_angle_diff and pred_triplet is None:
+        print(f'⚠ Angle summary unavailable for {sequence_name}: prediction mapping unknown for this subfolder')
 
-    total_frames = min(len(frames), len(gt_poses_3d))
+    selected_index_set = set(selected_indices)
+    angle_errors = []
+    written = 0
     for frame_idx in range(total_frames):
         window_indices = build_window_indices(frame_idx, len(frames), args.window_size)
         pose_window = yolo_poses_2d[window_indices]
         pred_pose_3d = predict_posemamba_window(
-            posemamba_model,
-            posemamba_config,
+            args.posemamba_model,
+            args.posemamba_config,
             pose_window,
             frames[frame_idx].shape,
-            device,
+            args.device_resolved,
             use_flip=args.flip_tta,
         )
 
-        gt_pose_3d = gt_poses_3d[frame_idx]
-        gt_pose_plot = prepare_uco_gt_for_plot(gt_pose_3d)
-        pred_pose_plot = prepare_pose_for_plot(pred_pose_3d)
+        gt_pose_3d = gt_poses_3d[frame_idx] if frame_idx < len(gt_poses_3d) else None
 
-        gt_angle = compute_joint_angle_degrees(gt_pose_plot, 0, 1, 2)
-        pred_angle = compute_joint_angle_degrees(pred_pose_plot, *pred_triplet)
+        if args.show_angle_diff and pred_triplet is not None:
+            gt_pose_plot = prepare_uco_gt_for_plot(gt_pose_3d)
+            pred_pose_plot = prepare_pose_for_plot(pred_pose_3d)
+            gt_angle = compute_joint_angle_degrees(gt_pose_plot, 0, 1, 2)
+            pred_angle = compute_joint_angle_degrees(pred_pose_plot, *pred_triplet)
 
-        if gt_angle is None or pred_angle is None:
-            continue
+            if gt_angle is not None and pred_angle is not None:
+                angle_errors.append(abs(gt_angle - pred_angle))
 
-        valid_frames += 1
-        gt_angles.append(gt_angle)
-        pred_angles.append(pred_angle)
-        abs_diffs.append(abs(gt_angle - pred_angle))
+        if frame_idx in selected_index_set:
+            output_path = save_frame_comparison(
+                frames[frame_idx],
+                gt_pose_3d,
+                pred_pose_3d,
+                sequence_name,
+                frame_idx,
+                output_sequence_dir,
+                angle_overlay_lines=None,
+            )
+            written += 1
+            print(f'✓ Saved {output_path}')
 
-    if device.startswith('cuda'):
+    if args.device_resolved.startswith('cuda'):
         torch.cuda.empty_cache()
     gc.collect()
 
-    return {
+    mean_angle_error = float(np.mean(angle_errors)) if angle_errors else None
+    summary = {
         'sequence': sequence_name,
-        'folder': folder,
-        'subfolder': f'{subfolder:02d}',
-        'camera': camera,
-        'status': 'ok',
-        'video_path': video_path,
-        'gt_path': gt_path,
-        'fps': float(fps),
-        'width': int(width),
-        'height': int(height),
-        'total_frames': int(total_frames),
-        'valid_frames': int(valid_frames),
-        'gt_triplet': '0-1-2',
-        'pred_triplet': pred_triplet_label,
-        'mean_gt_angle': format_mean(gt_angles),
-        'mean_pred_angle': format_mean(pred_angles),
-        'mean_abs_error': format_mean(abs_diffs),
-        'std_abs_error': format_std(abs_diffs),
-        'min_abs_error': float(np.min(abs_diffs)) if abs_diffs else None,
-        'max_abs_error': float(np.max(abs_diffs)) if abs_diffs else None,
-        'yolo_fps': float(performance_metrics['fps']),
-        'yolo_mean_inference_time_ms': float(performance_metrics['mean_inference_time'] * 1000.0),
+        'camera': args.camera,
+        'mean_angle_error_deg': mean_angle_error,
+        'valid_angle_frames': len(angle_errors),
+        'processed_frames': total_frames,
+        'selected_frames': selected_indices,
+        'prediction_triplet': pred_triplet_label,
     }
+    summary_path = os.path.join(output_sequence_dir, 'angle_summary.json')
+    with open(summary_path, 'w', encoding='utf-8') as handle:
+        json.dump(summary, handle, indent=2)
 
-
-def write_report(report_path, results, args):
-    os.makedirs(os.path.dirname(report_path) or '.', exist_ok=True)
-
-    successful = [result for result in results if result.get('status') == 'ok']
-    by_folder = defaultdict(list)
-    by_subfolder = defaultdict(list)
-    by_camera = defaultdict(list)
-
-    for result in successful:
-        by_folder[result['folder']].append(result)
-        by_subfolder[(result['folder'], result['subfolder'])].append(result)
-        by_camera[result['camera']].append(result)
-
-    with open(report_path, 'w', encoding='utf-8') as handle:
-        handle.write('UCO GT vs PoseMamba angle-error summary\n')
-        handle.write('=' * 80 + '\n')
-        handle.write(f'Folders: {args.folders}\n')
-        handle.write(f'Subfolders: {args.subfolders}\n')
-        handle.write(f'Cameras: {args.cameras}\n')
-        handle.write(f'Window size: {args.window_size}\n')
-        handle.write(f'Flip TTA: {"Enabled" if args.flip_tta else "Disabled"}\n')
-        handle.write('\n')
-
-        handle.write('Per-sequence results\n')
-        handle.write('-' * 80 + '\n')
-        for result in results:
-            if result['status'] != 'ok':
-                handle.write(
-                    f"{result['sequence']} | {result['camera']} | status={result['status']}\n"
-                )
-                continue
-
-            handle.write(
-                f"folder={result['folder']} subfolder={result['subfolder']} camera={result['camera']} "
-                f"frames={result['valid_frames']}/{result['total_frames']} "
-                f"gt_triplet={result['gt_triplet']} pred_triplet={result['pred_triplet']} "
-                f"mean_gt_angle={result['mean_gt_angle']:.3f} deg "
-                f"mean_pred_angle={result['mean_pred_angle']:.3f} deg "
-                f"mean_abs_error={result['mean_abs_error']:.3f} deg "
-                f"std_abs_error={result['std_abs_error']:.3f} deg "
-                f"min_abs_error={result['min_abs_error']:.3f} deg "
-                f"max_abs_error={result['max_abs_error']:.3f} deg\n"
-            )
-
-        handle.write('\n')
-        handle.write('Aggregated summaries\n')
-        handle.write('-' * 80 + '\n')
-
-        handle.write('By folder\n')
-        for folder in sorted(by_folder.keys()):
-            folder_results = by_folder[folder]
-            handle.write(
-                f"folder={folder} sequences={len(folder_results)} "
-                f"mean_abs_error={format_mean([r['mean_abs_error'] for r in folder_results]):.3f} deg "
-                f"mean_gt_angle={format_mean([r['mean_gt_angle'] for r in folder_results]):.3f} deg "
-                f"mean_pred_angle={format_mean([r['mean_pred_angle'] for r in folder_results]):.3f} deg\n"
-            )
-
-        handle.write('\nBy subfolder\n')
-        for folder, subfolder in sorted(by_subfolder.keys()):
-            seq_results = by_subfolder[(folder, subfolder)]
-            handle.write(
-                f"folder={folder} subfolder={subfolder} sequences={len(seq_results)} "
-                f"mean_abs_error={format_mean([r['mean_abs_error'] for r in seq_results]):.3f} deg "
-                f"mean_gt_angle={format_mean([r['mean_gt_angle'] for r in seq_results]):.3f} deg "
-                f"mean_pred_angle={format_mean([r['mean_pred_angle'] for r in seq_results]):.3f} deg\n"
-            )
-
-        handle.write('\nBy camera\n')
-        for camera in sorted(by_camera.keys()):
-            camera_results = by_camera[camera]
-            handle.write(
-                f"camera={camera} sequences={len(camera_results)} "
-                f"mean_abs_error={format_mean([r['mean_abs_error'] for r in camera_results]):.3f} deg "
-                f"mean_gt_angle={format_mean([r['mean_gt_angle'] for r in camera_results]):.3f} deg "
-                f"mean_pred_angle={format_mean([r['mean_pred_angle'] for r in camera_results]):.3f} deg\n"
-            )
-
-        handle.write('\nOverall\n')
-        handle.write(
-            f"sequences={len(successful)} "
-            f"mean_abs_error={format_mean([r['mean_abs_error'] for r in successful]):.3f} deg "
-            f"mean_gt_angle={format_mean([r['mean_gt_angle'] for r in successful]):.3f} deg "
-            f"mean_pred_angle={format_mean([r['mean_pred_angle'] for r in successful]):.3f} deg\n"
+    if mean_angle_error is None:
+        print(f'⚠ {sequence_name} {args.camera}: mean angle error unavailable (no valid GT/prediction frame pairs)')
+    else:
+        print(
+            f'✓ {sequence_name} {args.camera}: mean angle error = {mean_angle_error:.2f} deg '
+            f'over {len(angle_errors)} valid frames (saved {written} selected-frame images)'
         )
+    print(f'✓ Stored sequence angle summary at {summary_path}')
+
+    print(
+        f"✓ {sequence_name} {args.camera}: saved={written}, "
+        f"YOLO FPS={performance_metrics['fps']:.2f}, "
+        f"mean inference={performance_metrics['mean_inference_time'] * 1000.0:.2f} ms"
+    )
+    return output_sequence_dir
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Compute UCO GT vs PoseMamba 3D angle error summaries')
-    parser.add_argument('--yolo-model', '--model-path', dest='yolo_model', type=str, default=DEFAULT_YOLO_MODEL_PATH, help='Path to the trained YOLO pose model')
+    parser = argparse.ArgumentParser(description='Save selected UCO frame comparisons and compute whole-sequence GT vs PoseMamba angle summary')
+    parser.add_argument('--sequence', type=str, required=True, help='UCO sequence in folder/subfolder format, for example 0/01')
+    parser.add_argument('--frames', type=int, nargs='+', required=True, help='Frame indices to process')
+    parser.add_argument('--camera', type=str, default='cam0', choices=DEFAULT_CAMERAS, help='Camera to use')
+    parser.add_argument('--model-path', '--yolo-model', dest='yolo_model', type=str, default=DEFAULT_YOLO_MODEL_PATH, help='Path to the trained YOLO pose model')
     parser.add_argument('--posemamba-config', type=str, default=DEFAULT_POSEMAMBA_CONFIG, help='Path to the PoseMamba config file')
     parser.add_argument('--posemamba-checkpoint', type=str, default=DEFAULT_POSEMAMBA_CHECKPOINT, help='Path to the PoseMamba checkpoint file')
-    parser.add_argument('--gt-3d-file', type=str, default=DEFAULT_GT_3D_FILE, help='Optional explicit GT 3D text file; otherwise auto-resolve per sequence')
-    parser.add_argument('--report-file', type=str, default=DEFAULT_REPORT_FILE, help='Text file to write the summary report')
-    parser.add_argument('--folders', type=int, nargs='*', default=DEFAULT_FOLDERS, help='UCO folders to process (default: 0..26)')
-    parser.add_argument('--subfolders', type=int, nargs='*', default=DEFAULT_SUBFOLDERS, help='UCO subfolders to process (default: 9..16)')
-    parser.add_argument('--cameras', type=str, nargs='*', default=DEFAULT_CAMERAS, help='UCO cameras to process')
+    parser.add_argument('--gt-3d-file', type=str, default=DEFAULT_GT_3D_FILE, help='Explicit path to the UCO p3d.txt file')
+    parser.add_argument('--output-dir', type=str, default='uco_gt_pred_selected_frames', help='Directory to save output PNGs')
     parser.add_argument('--img-size', type=int, default=640, help='YOLO input image size')
     parser.add_argument('--batch-size', type=int, default=16, help='YOLO batch size over frames')
     parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cpu, cuda, cuda:0, etc.')
     parser.add_argument('--window-size', type=int, default=5, help='PoseMamba temporal window size (must be odd)')
     parser.add_argument('--flip-tta', action='store_true', help='Enable flip test-time augmentation for PoseMamba')
+    parser.add_argument('--show-angle-diff', action='store_true', help='Compute and print the mean GT vs prediction angle error over the whole sequence')
     parser.add_argument('--disable-triton', action='store_true', help='Disable Triton imports for PoseMamba')
+    parser.add_argument('--no-save-images', dest='save_images', action='store_false', help='Do not save comparison images')
+    parser.set_defaults(save_images=True)
     args = parser.parse_args()
 
     if args.window_size < 3 or args.window_size % 2 == 0:
         parser.error('--window-size must be an odd integer greater than or equal to 3')
     if args.batch_size <= 0:
         parser.error('--batch-size must be a positive integer')
-
+    if not args.save_images:
+        print('Saving disabled with --no-save-images; nothing to do.')
+        return
     if args.disable_triton:
         os.environ['DISABLE_TRITON'] = '1'
 
     print('=' * 80)
-    print('UCO GT vs PoseMamba angle error summary')
+    print('UCO GT 3D + PoseMamba sequence angle summary renderer')
     print('=' * 80)
-    print(f'Folders: {args.folders}')
-    print(f'Subfolders: {args.subfolders}')
-    print(f'Cameras: {args.cameras}')
+    print(f'Sequence: {args.sequence}')
+    print(f'Camera: {args.camera}')
+    print(f'Frames: {args.frames}')
     print(f'YOLO model: {args.yolo_model}')
     print(f'PoseMamba config: {args.posemamba_config}')
     print(f'PoseMamba checkpoint: {args.posemamba_checkpoint}')
-    print(f'Report file: {args.report_file}')
+    print(f'GT 3D file: {args.gt_3d_file or "auto-resolve"}')
+    print(f'Output dir: {args.output_dir}')
     print(f'Window size: {args.window_size}')
     print(f'Flip TTA: {"Enabled" if args.flip_tta else "Disabled"}')
+    print(f'Angle diff overlay: {"Enabled" if args.show_angle_diff else "Disabled"}')
     print(f'Device: {args.device}')
     print('=' * 80)
 
@@ -677,16 +676,17 @@ def main():
         return
 
     if args.device == 'auto':
-        device, gpu_available = check_gpu_availability()
+        device_resolved, gpu_available = check_gpu_availability()
     else:
-        device = args.device
-        gpu_available = device.startswith('cuda') and torch.cuda.is_available()
+        device_resolved = args.device
+        gpu_available = device_resolved.startswith('cuda') and torch.cuda.is_available()
 
     print(f'🤖 Loading YOLO model from {args.yolo_model}...')
     try:
         yolo_model = YOLO(args.yolo_model)
         if gpu_available:
-            yolo_model.to(device)
+            print(f'📦 Moving YOLO model to {device_resolved}...')
+            yolo_model.to(device_resolved)
         print('✓ YOLO model loaded successfully')
     except Exception as exc:
         print(f'❌ Error loading YOLO model: {exc}')
@@ -697,59 +697,20 @@ def main():
         posemamba_model, posemamba_config = load_posemamba_model(
             args.posemamba_config,
             args.posemamba_checkpoint,
-            device,
+            device_resolved,
         )
         print('✓ PoseMamba model loaded successfully')
     except Exception as exc:
         print(f'❌ Error loading PoseMamba model: {exc}')
         return
 
-    results = []
+    args.yolo_model_instance = yolo_model
+    args.posemamba_model = posemamba_model
+    args.posemamba_config = posemamba_config
+    args.device_resolved = device_resolved
+
     try:
-        for folder in args.folders:
-            print(f'\n--- Subject {folder:02d} start ---')
-            for subfolder in args.subfolders:
-                print(f'  -> Subfolder {folder:02d}/{subfolder:02d} start')
-                for camera in args.cameras:
-                    print(f'     -> Camera {camera} start')
-                    try:
-                        result = process_sequence_camera(
-                            yolo_model,
-                            posemamba_model,
-                            posemamba_config,
-                            folder,
-                            subfolder,
-                            camera,
-                            args,
-                            device,
-                        )
-                    except Exception as exc:
-                        result = {
-                            'sequence': f'{folder}/{subfolder:02d}',
-                            'folder': folder,
-                            'subfolder': f'{subfolder:02d}',
-                            'camera': camera,
-                            'status': f'error: {exc}',
-                        }
-                    results.append(result)
-
-                    if result.get('status') == 'ok':
-                        print(
-                            f"     ✓ {result['sequence']} | {result['camera']} | "
-                            f"mean angle difference={result['mean_abs_error']:.3f} deg "
-                            f"(gt={result['mean_gt_angle']:.3f}, pred={result['mean_pred_angle']:.3f})"
-                        )
-                    else:
-                        print(f"     ! Camera {camera} failed with status={result['status']}")
-
-                    print(f'     <- Camera {camera} done')
-
-                print(f'  <- Subfolder {folder:02d}/{subfolder:02d} done')
-
-            print(f'--- Subject {folder:02d} done ---')
-
-        write_report(args.report_file, results, args)
-        print(f'✓ Report written to {args.report_file}')
+        process_selected_frames(args.sequence, args.frames, args)
     finally:
         if gpu_available:
             torch.cuda.empty_cache()

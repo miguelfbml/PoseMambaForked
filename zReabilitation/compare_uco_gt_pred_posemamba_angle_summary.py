@@ -22,8 +22,10 @@ import argparse
 import gc
 import os
 import sys
+import time
 from collections import defaultdict
 
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
@@ -43,25 +45,246 @@ if ZDEMO_DIR not in sys.path:
 from lib.utils.learning import load_backbone  # noqa: E402
 from lib.utils.tools import get_config  # noqa: E402
 from lib.utils.utils_data import flip_data  # noqa: E402
-from zReabilitation.comparePose import (  # noqa: E402
-    DEFAULT_POSEMAMBA_CHECKPOINT,
-    DEFAULT_POSEMAMBA_CONFIG,
-    DEFAULT_YOLO_MODEL_PATH,
-    build_window_indices,
-    check_gpu_availability,
-    load_posemamba_model,
-    load_video_frames,
-    prepare_pose_for_plot,
-    predict_posemamba_window,
+
+
+DEFAULT_YOLO_MODEL_PATH = os.path.join(ZDEMO_DIR, 'weights', 'yolo', 'best.pt')
+DEFAULT_POSEMAMBA_CONFIG = os.path.join(
+    PROJECT_ROOT,
+    'configs',
+    'pose3d',
+    'testing',
+    'notestaug',
+    'PoseMamba_train_3dhp_S_5.yaml',
 )
-from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
+DEFAULT_POSEMAMBA_CHECKPOINT = os.path.join(
+    ZDEMO_DIR,
+    'weights',
+    'PoseMamba',
+    'ModelS',
+    'best_epoch_5.bin',
+)
 
 
 DEFAULT_FOLDERS = list(range(0, 27))
 DEFAULT_SUBFOLDERS = list(range(9, 17))
+DEFAULT_CAMERAS = ['cam0', 'cam1', 'cam2', 'cam3', 'cam4']
 DEFAULT_REPORT_FILE = 'uco_angle_error_report.txt'
 DEFAULT_GT_3D_FILE = ''
 UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/dataset/clips_mp4'
+
+
+def check_gpu_availability():
+    gpu_available = torch.cuda.is_available()
+    if gpu_available:
+        current_device = torch.cuda.current_device()
+        return f'cuda:{current_device}', True
+    return 'cpu', False
+
+
+def normalize_screen_coordinates(points, width, height):
+    assert points.shape[-1] == 2
+    return points / width * 2 - [1, height / width]
+
+
+def apply_upright_correction(poses_3d):
+    rotation_x_90 = np.array([
+        [1, 0, 0],
+        [0, 0, 1],
+        [0, -1, 0],
+    ], dtype=np.float32)
+    rotation_z_90 = np.array([
+        [0, -1, 0],
+        [1, 0, 0],
+        [0, 0, 1],
+    ], dtype=np.float32)
+    theta = np.deg2rad(45)
+    rotation_z_45 = np.array([
+        [np.cos(theta), -np.sin(theta), 0],
+        [np.sin(theta), np.cos(theta), 0],
+        [0, 0, 1],
+    ], dtype=np.float32)
+    return poses_3d @ rotation_x_90.T @ rotation_z_90.T @ rotation_z_45.T
+
+
+def make_root_relative_3d(poses_3d, root_joint_idx=14):
+    root_pos = poses_3d[root_joint_idx]
+    root_relative_poses = poses_3d - root_pos[np.newaxis, :]
+    root_relative_poses[root_joint_idx] = [0.0, 0.0, 0.0]
+    return root_relative_poses
+
+
+def scale_pose_to_max(pose_3d, max_value=900):
+    max_coord = np.max(np.abs(pose_3d))
+    if max_coord < 1e-6:
+        return pose_3d
+    return pose_3d * (max_value / max_coord)
+
+
+def build_window_indices(center_idx, total_frames, window_size):
+    half_window = window_size // 2
+    indices = []
+    for offset in range(-half_window, half_window + 1):
+        index = center_idx + offset
+        index = max(0, min(total_frames - 1, index))
+        indices.append(index)
+    return indices
+
+
+def load_video_frames(video_path):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None, 0.0, 0, 0
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps is None or fps <= 0:
+        fps = 30.0
+
+    frames = []
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    if width <= 0 or height <= 0:
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            cap.release()
+            return None, fps, 0, 0
+        height, width = frame.shape[:2]
+        frames.append(frame)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        frames.append(frame)
+
+    cap.release()
+    return frames, fps, width, height
+
+
+def load_posemamba_model(config_path, checkpoint_path, device):
+    config = get_config(config_path)
+    model_backbone = load_backbone(config)
+
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    state_dict = checkpoint['model_pos']
+    model_is_dp = isinstance(model_backbone, nn.DataParallel)
+    ckpt_has_module_prefix = any(key.startswith('module.') for key in state_dict.keys())
+
+    if ckpt_has_module_prefix and not model_is_dp:
+        state_dict = {key[len('module.'):]: value for key, value in state_dict.items()}
+    elif (not ckpt_has_module_prefix) and model_is_dp:
+        state_dict = {f'module.{key}': value for key, value in state_dict.items()}
+
+    model_backbone.load_state_dict(state_dict, strict=True)
+    model_backbone.to(device)
+    model_backbone.eval()
+    return model_backbone, config
+
+
+def predict_posemamba_window(model, posemamba_config, poses_2d_window, frame_shape, device, use_flip=False):
+    normalized_2d = poses_2d_window.copy().astype(np.float32)
+    normalized_2d[:, :, :2] = normalize_screen_coordinates(
+        normalized_2d[:, :, :2],
+        frame_shape[1],
+        frame_shape[0],
+    )
+
+    input_2d = torch.from_numpy(normalized_2d).unsqueeze(0).float()
+    if bool(getattr(posemamba_config, 'no_conf', False)):
+        input_2d = input_2d[:, :, :, :2]
+
+    if device.startswith('cuda'):
+        input_2d = input_2d.cuda()
+
+    with torch.no_grad():
+        if use_flip:
+            input_2d_flip = flip_data(input_2d)
+            pred_3d_main = model(input_2d)
+            pred_3d_flip = model(input_2d_flip)
+            pred_3d = (pred_3d_main + flip_data(pred_3d_flip)) / 2.0
+        else:
+            pred_3d = model(input_2d)
+
+    middle_idx = len(poses_2d_window) // 2
+    pred_3d_middle = pred_3d[0, middle_idx].detach().cpu().numpy()
+    return pred_3d_middle
+
+
+def prepare_pose_for_plot(pose_3d):
+    if pose_3d is None:
+        return None
+
+    post_out = pose_3d.copy().astype(np.float32)
+    post_out = apply_upright_correction(post_out)
+    post_out = make_root_relative_3d(post_out)
+    post_out = scale_pose_to_max(post_out)
+    return post_out
+
+
+def estimate_yolo_poses(model, frames, img_size=640, device='cpu', batch_size=None):
+    yolo_poses = []
+    confidences = []
+    inference_times = []
+
+    if batch_size is None:
+        batch_size = 32 if device.startswith('cuda') else 16
+
+    for start_idx in range(0, len(frames), batch_size):
+        batch_frames = frames[start_idx:start_idx + batch_size]
+
+        for frame in batch_frames:
+            try:
+                start_time = time.time()
+                results = model.predict(frame, verbose=False, imgsz=img_size, conf=0.65, device=device)
+                inference_times.append(time.time() - start_time)
+
+                if (
+                    results and len(results) > 0 and
+                    hasattr(results[0], 'keypoints') and
+                    results[0].keypoints is not None and
+                    len(results[0].keypoints.xy) > 0
+                ):
+                    keypoints = results[0].keypoints.xy[0].cpu().numpy()
+                    conf = results[0].keypoints.conf[0].cpu().numpy() if results[0].keypoints.conf is not None else np.ones(17)
+
+                    if keypoints.shape[0] == 17:
+                        yolo_poses.append(keypoints)
+                        confidences.append(conf)
+                    else:
+                        padded_kpts = np.zeros((17, 2))
+                        padded_conf = np.zeros(17)
+                        n_kpts = min(17, keypoints.shape[0])
+                        padded_kpts[:n_kpts] = keypoints[:n_kpts]
+                        padded_conf[:n_kpts] = conf[:n_kpts] if len(conf) > 0 else 0.5
+                        yolo_poses.append(padded_kpts)
+                        confidences.append(padded_conf)
+                else:
+                    yolo_poses.append(np.zeros((17, 2)))
+                    confidences.append(np.zeros(17))
+            except Exception as exc:
+                print(f'Error in YOLO inference: {exc}')
+                yolo_poses.append(np.zeros((17, 2)))
+                confidences.append(np.zeros(17))
+                inference_times.append(0.0)
+
+        if device.startswith('cuda'):
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    yolo_poses = np.asarray(yolo_poses, dtype=np.float32)
+    confidences = np.asarray(confidences, dtype=np.float32)
+    total_inference_time = float(sum(inference_times))
+    mean_inference_time = float(np.mean(inference_times)) if inference_times else 0.0
+    fps = 1.0 / mean_inference_time if mean_inference_time > 0 else 0.0
+
+    performance_metrics = {
+        'total_inference_time': total_inference_time,
+        'mean_inference_time': mean_inference_time,
+        'fps': fps,
+        'processed_frames': len(frames),
+    }
+
+    return yolo_poses, confidences, performance_metrics
 
 
 def compute_joint_angle_degrees(pose_3d, joint_a, joint_b, joint_c):
@@ -319,9 +542,9 @@ def write_report(report_path, results, args):
     os.makedirs(os.path.dirname(report_path) or '.', exist_ok=True)
 
     successful = [result for result in results if result.get('status') == 'ok']
-    by_folder = collections.defaultdict(list)
-    by_subfolder = collections.defaultdict(list)
-    by_camera = collections.defaultdict(list)
+    by_folder = defaultdict(list)
+    by_subfolder = defaultdict(list)
+    by_camera = defaultdict(list)
 
     for result in successful:
         by_folder[result['folder']].append(result)

@@ -20,7 +20,6 @@ python compare_uco_gt_pred_posemamba_selected_frames.py \
 
 import argparse
 import gc
-import json
 import os
 import sys
 
@@ -461,21 +460,6 @@ def compose_side_by_side(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, fra
     return np.concatenate([left_panel, separator, right_panel_bgr], axis=1)
 
 
-def save_frame_comparison(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx, output_dir, angle_overlay_lines=None):
-    output = compose_side_by_side(
-        frame_bgr,
-        gt_pose_3d,
-        pred_pose_3d,
-        sequence_name,
-        frame_idx,
-        angle_overlay_lines=angle_overlay_lines,
-    )
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, f'frame_{frame_idx:06d}_gt_overlay_posemamba3d.png')
-    cv2.imwrite(output_path, output)
-    return output_path
-
-
 def process_selected_frames(sequence_name, frame_indices, args):
     if '/' not in sequence_name:
         print(f'❌ Expected UCO sequence in folder/subfolder format, got: {sequence_name}')
@@ -510,10 +494,7 @@ def process_selected_frames(sequence_name, frame_indices, args):
         return None
 
     total_frames = min(len(frames), len(gt_poses_3d))
-    selected_indices = [frame_idx for frame_idx in frame_indices if 0 <= frame_idx < total_frames]
-    if not selected_indices:
-        print('❌ No valid frame indices were provided')
-        return None
+    requested_indices = [frame_idx for frame_idx in frame_indices if 0 <= frame_idx < total_frames]
 
     print('\n' + '=' * 80)
     print(f'▶ Starting sequence processing: {sequence_name} | {args.camera}')
@@ -521,7 +502,8 @@ def process_selected_frames(sequence_name, frame_indices, args):
     print(f'Video: {video_path}')
     print(f'GT 3D: {gt_path}')
     print(f'Frames: {len(frames)} | FPS: {fps:.2f} | Size: {width}x{height}')
-    print(f'Selected frames: {selected_indices}')
+    if requested_indices:
+        print(f'Requested frame indices (ignored for scoring, kept for compatibility): {requested_indices}')
     print('=' * 80)
 
     yolo_poses_2d, _, performance_metrics = estimate_yolo_poses(
@@ -536,16 +518,11 @@ def process_selected_frames(sequence_name, frame_indices, args):
         print(f'⚠ YOLO output length mismatch: {len(yolo_poses_2d)} vs {len(frames)}')
         return None
 
-    output_sequence_dir = os.path.join(args.output_dir, str(folder_idx), f'{subfolder_idx:02d}', args.camera)
-    os.makedirs(output_sequence_dir, exist_ok=True)
-
     pred_triplet, pred_triplet_label = get_prediction_angle_triplet(subfolder_idx)
     if args.show_angle_diff and pred_triplet is None:
         print(f'⚠ Angle summary unavailable for {sequence_name}: prediction mapping unknown for this subfolder')
 
-    selected_index_set = set(selected_indices)
     angle_errors = []
-    written = 0
     for frame_idx in range(total_frames):
         window_indices = build_window_indices(frame_idx, len(frames), args.window_size)
         pose_window = yolo_poses_2d[window_indices]
@@ -569,56 +546,41 @@ def process_selected_frames(sequence_name, frame_indices, args):
             if gt_angle is not None and pred_angle is not None:
                 angle_errors.append(abs(gt_angle - pred_angle))
 
-        if frame_idx in selected_index_set:
-            output_path = save_frame_comparison(
-                frames[frame_idx],
-                gt_pose_3d,
-                pred_pose_3d,
-                sequence_name,
-                frame_idx,
-                output_sequence_dir,
-                angle_overlay_lines=None,
-            )
-            written += 1
-            print(f'✓ Saved {output_path}')
-
     if args.device_resolved.startswith('cuda'):
         torch.cuda.empty_cache()
     gc.collect()
 
     mean_angle_error = float(np.mean(angle_errors)) if angle_errors else None
-    summary = {
+
+    if mean_angle_error is None:
+        print(f'⚠ {sequence_name} {args.camera}: mean angle error unavailable (no valid GT/prediction frame pairs)')
+    else:
+        print(f'✓ {sequence_name} {args.camera}: mean angle error = {mean_angle_error:.2f} deg over {len(angle_errors)} valid frames')
+
+    print(
+        f'RESULT sequence={sequence_name} camera={args.camera} '
+        f'mean_angle_error_deg={"nan" if mean_angle_error is None else f"{mean_angle_error:.6f}"} '
+        f'valid_angle_frames={len(angle_errors)} '
+        f'processed_frames={total_frames} '
+        f'prediction_triplet={pred_triplet_label or "none"}'
+    )
+
+    print(
+        f"✓ {sequence_name} {args.camera}: YOLO FPS={performance_metrics['fps']:.2f}, "
+        f"mean inference={performance_metrics['mean_inference_time'] * 1000.0:.2f} ms"
+    )
+    return {
         'sequence': sequence_name,
         'camera': args.camera,
         'mean_angle_error_deg': mean_angle_error,
         'valid_angle_frames': len(angle_errors),
         'processed_frames': total_frames,
-        'selected_frames': selected_indices,
         'prediction_triplet': pred_triplet_label,
     }
-    summary_path = os.path.join(output_sequence_dir, 'angle_summary.json')
-    with open(summary_path, 'w', encoding='utf-8') as handle:
-        json.dump(summary, handle, indent=2)
-
-    if mean_angle_error is None:
-        print(f'⚠ {sequence_name} {args.camera}: mean angle error unavailable (no valid GT/prediction frame pairs)')
-    else:
-        print(
-            f'✓ {sequence_name} {args.camera}: mean angle error = {mean_angle_error:.2f} deg '
-            f'over {len(angle_errors)} valid frames (saved {written} selected-frame images)'
-        )
-    print(f'✓ Stored sequence angle summary at {summary_path}')
-
-    print(
-        f"✓ {sequence_name} {args.camera}: saved={written}, "
-        f"YOLO FPS={performance_metrics['fps']:.2f}, "
-        f"mean inference={performance_metrics['mean_inference_time'] * 1000.0:.2f} ms"
-    )
-    return output_sequence_dir
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Save selected UCO frame comparisons and compute whole-sequence GT vs PoseMamba angle summary')
+    parser = argparse.ArgumentParser(description='Compute whole-sequence GT vs PoseMamba angle summary for UCO videos')
     parser.add_argument('--sequence', type=str, required=True, help='UCO sequence in folder/subfolder format, for example 0/01')
     parser.add_argument('--frames', type=int, nargs='+', required=True, help='Frame indices to process')
     parser.add_argument('--camera', type=str, default='cam0', choices=DEFAULT_CAMERAS, help='Camera to use')
@@ -626,7 +588,7 @@ def main():
     parser.add_argument('--posemamba-config', type=str, default=DEFAULT_POSEMAMBA_CONFIG, help='Path to the PoseMamba config file')
     parser.add_argument('--posemamba-checkpoint', type=str, default=DEFAULT_POSEMAMBA_CHECKPOINT, help='Path to the PoseMamba checkpoint file')
     parser.add_argument('--gt-3d-file', type=str, default=DEFAULT_GT_3D_FILE, help='Explicit path to the UCO p3d.txt file')
-    parser.add_argument('--output-dir', type=str, default='uco_gt_pred_selected_frames', help='Directory to save output PNGs')
+    parser.add_argument('--output-dir', type=str, default='uco_gt_pred_selected_frames', help='Retained for compatibility; no images are saved')
     parser.add_argument('--img-size', type=int, default=640, help='YOLO input image size')
     parser.add_argument('--batch-size', type=int, default=16, help='YOLO batch size over frames')
     parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cpu, cuda, cuda:0, etc.')
@@ -634,17 +596,14 @@ def main():
     parser.add_argument('--flip-tta', action='store_true', help='Enable flip test-time augmentation for PoseMamba')
     parser.add_argument('--show-angle-diff', action='store_true', help='Compute and print the mean GT vs prediction angle error over the whole sequence')
     parser.add_argument('--disable-triton', action='store_true', help='Disable Triton imports for PoseMamba')
-    parser.add_argument('--no-save-images', dest='save_images', action='store_false', help='Do not save comparison images')
-    parser.set_defaults(save_images=True)
+    parser.add_argument('--no-save-images', dest='save_images', action='store_false', help='Retained for compatibility; image saving is disabled')
+    parser.set_defaults(save_images=False)
     args = parser.parse_args()
 
     if args.window_size < 3 or args.window_size % 2 == 0:
         parser.error('--window-size must be an odd integer greater than or equal to 3')
     if args.batch_size <= 0:
         parser.error('--batch-size must be a positive integer')
-    if not args.save_images:
-        print('Saving disabled with --no-save-images; nothing to do.')
-        return
     if args.disable_triton:
         os.environ['DISABLE_TRITON'] = '1'
 
@@ -653,7 +612,7 @@ def main():
     print('=' * 80)
     print(f'Sequence: {args.sequence}')
     print(f'Camera: {args.camera}')
-    print(f'Frames: {args.frames}')
+    print(f'Frames (compatibility input only): {args.frames}')
     print(f'YOLO model: {args.yolo_model}')
     print(f'PoseMamba config: {args.posemamba_config}')
     print(f'PoseMamba checkpoint: {args.posemamba_checkpoint}')

@@ -735,7 +735,8 @@ def main():
 
                     if result.get('status') == 'ok':
                         print(
-                            f"     ✓ mean_abs_error={result['mean_abs_error']:.3f} deg "
+                            f"     ✓ {result['sequence']} | {result['camera']} | "
+                            f"mean angle difference={result['mean_abs_error']:.3f} deg "
                             f"(gt={result['mean_gt_angle']:.3f}, pred={result['mean_pred_angle']:.3f})"
                         )
                     else:

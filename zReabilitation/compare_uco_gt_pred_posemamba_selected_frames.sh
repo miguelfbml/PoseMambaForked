@@ -29,7 +29,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 
@@ -43,7 +44,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 
@@ -57,7 +59,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 
@@ -71,8 +74,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
-
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 python3 compare_uco_gt_pred_posemamba_selected_frames.py \
@@ -85,7 +88,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 python3 compare_uco_gt_pred_posemamba_selected_frames.py \
@@ -98,7 +102,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 
@@ -112,7 +117,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 
@@ -127,7 +133,8 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --output-dir "$OUTPUT_DIR" \
     --img-size "640" \
     --batch-size "16" \
-    --device "cuda:0"
+    --device "cuda:0" \
+    --show-angle-diff
 
 
 

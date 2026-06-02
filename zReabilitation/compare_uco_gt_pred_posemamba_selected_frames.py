@@ -84,6 +84,77 @@ GT_JOINT_NAMES = ['Shoulder', 'Elbow', 'Hand']
 GT_CONNECTIONS_3D = [(0, 1), (1, 2)]
 
 
+def compute_joint_angle_degrees(pose_3d, joint_a, joint_b, joint_c):
+    if pose_3d is None:
+        return None
+
+    max_joint_idx = max(joint_a, joint_b, joint_c)
+    if pose_3d.shape[0] <= max_joint_idx:
+        return None
+
+    vec_ab = pose_3d[joint_a] - pose_3d[joint_b]
+    vec_cb = pose_3d[joint_c] - pose_3d[joint_b]
+    norm_ab = float(np.linalg.norm(vec_ab))
+    norm_cb = float(np.linalg.norm(vec_cb))
+    if norm_ab < 1e-6 or norm_cb < 1e-6:
+        return None
+
+    cos_angle = float(np.dot(vec_ab, vec_cb) / (norm_ab * norm_cb))
+    cos_angle = float(np.clip(cos_angle, -1.0, 1.0))
+    return float(np.degrees(np.arccos(cos_angle)))
+
+
+def get_prediction_angle_triplet(subfolder_idx):
+    if 9 <= subfolder_idx <= 12:
+        return (5, 6, 7), '5-6-7'
+    if 13 <= subfolder_idx <= 16:
+        return (2, 3, 4), '2-3-4'
+    return None, None
+
+
+def draw_text_block(image, lines, origin=(20, 20), background_color=(0, 0, 0), background_alpha=0.55):
+    if not lines:
+        return image
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    thickness = 2
+    line_gap = 8
+    padding_x = 12
+    padding_y = 10
+
+    text_sizes = [cv2.getTextSize(line, font, font_scale, thickness)[0] for line in lines]
+    text_width = max((size[0] for size in text_sizes), default=0)
+    text_height = sum(size[1] for size in text_sizes) + line_gap * max(len(lines) - 1, 0)
+
+    x0, y0 = origin
+    box_w = text_width + padding_x * 2
+    box_h = text_height + padding_y * 2
+    x0 = max(0, min(x0, image.shape[1] - box_w - 1))
+    y0 = max(0, min(y0, image.shape[0] - box_h - 1))
+
+    overlay = image.copy()
+    cv2.rectangle(overlay, (x0, y0), (x0 + box_w, y0 + box_h), background_color, -1)
+    image = cv2.addWeighted(overlay, background_alpha, image, 1.0 - background_alpha, 0.0)
+
+    cursor_y = y0 + padding_y
+    for line, size in zip(lines, text_sizes):
+        cursor_y += size[1]
+        cv2.putText(
+            image,
+            line,
+            (x0 + padding_x, cursor_y),
+            font,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
+        cursor_y += line_gap
+
+    return image
+
+
 def load_posemamba_model(config_path, checkpoint_path, device):
     config = get_config(config_path)
     model_backbone = load_backbone(config)
@@ -311,7 +382,7 @@ def render_gt_panel(pose_3d, width, height, sequence_name, frame_idx):
     return image
 
 
-def compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, frame_idx):
+def compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, frame_idx, angle_overlay_lines=None):
     height, width = frame_bgr.shape[:2]
     output = frame_bgr.copy()
 
@@ -357,12 +428,22 @@ def compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, fra
         2,
         cv2.LINE_AA,
     )
+
+    if angle_overlay_lines:
+        output = draw_text_block(output, angle_overlay_lines, origin=(width - 420, 20))
+
     return output
 
 
-def compose_side_by_side(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx):
+def compose_side_by_side(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx, angle_overlay_lines=None):
     height, width = frame_bgr.shape[:2]
-    left_panel = compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, frame_idx)
+    left_panel = compose_left_panel_with_gt_overlay(
+        frame_bgr,
+        gt_pose_3d,
+        sequence_name,
+        frame_idx,
+        angle_overlay_lines=angle_overlay_lines,
+    )
     right_panel = render_pose_panel(
         pred_pose_3d,
         width,
@@ -379,8 +460,15 @@ def compose_side_by_side(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, fra
     return np.concatenate([left_panel, separator, right_panel_bgr], axis=1)
 
 
-def save_frame_comparison(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx, output_dir):
-    output = compose_side_by_side(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx)
+def save_frame_comparison(frame_bgr, gt_pose_3d, pred_pose_3d, sequence_name, frame_idx, output_dir, angle_overlay_lines=None):
+    output = compose_side_by_side(
+        frame_bgr,
+        gt_pose_3d,
+        pred_pose_3d,
+        sequence_name,
+        frame_idx,
+        angle_overlay_lines=angle_overlay_lines,
+    )
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f'frame_{frame_idx:06d}_gt_overlay_posemamba3d.png')
     cv2.imwrite(output_path, output)
@@ -463,6 +551,34 @@ def process_selected_frames(sequence_name, frame_indices, args):
         )
 
         gt_pose_3d = gt_poses_3d[frame_idx] if frame_idx < len(gt_poses_3d) else None
+        angle_overlay_lines = None
+        if args.show_angle_diff:
+            gt_pose_plot = prepare_uco_gt_for_plot(gt_pose_3d)
+            pred_pose_plot = prepare_pose_for_plot(pred_pose_3d)
+            gt_angle = compute_joint_angle_degrees(gt_pose_plot, 0, 1, 2)
+            pred_triplet, pred_triplet_label = get_prediction_angle_triplet(subfolder_idx)
+            pred_angle = None
+            if pred_triplet is not None:
+                pred_angle = compute_joint_angle_degrees(pred_pose_plot, *pred_triplet)
+
+            if gt_angle is not None and pred_angle is not None:
+                angle_diff = abs(gt_angle - pred_angle)
+                angle_overlay_lines = [
+                    f'GT angle (0-1-2): {gt_angle:.1f} deg',
+                    f'Pred angle ({pred_triplet_label}): {pred_angle:.1f} deg',
+                    f'|Diff|: {angle_diff:.1f} deg',
+                ]
+            elif pred_triplet is None:
+                angle_overlay_lines = [
+                    'Angle diff unavailable',
+                    'Prediction mapping unknown for this subfolder',
+                ]
+            else:
+                angle_overlay_lines = [
+                    'Angle diff unavailable',
+                    'Missing GT or prediction angle',
+                ]
+
         output_path = save_frame_comparison(
             frames[frame_idx],
             gt_pose_3d,
@@ -470,6 +586,7 @@ def process_selected_frames(sequence_name, frame_indices, args):
             sequence_name,
             frame_idx,
             output_sequence_dir,
+            angle_overlay_lines=angle_overlay_lines,
         )
         written += 1
         print(f'✓ Saved {output_path}')
@@ -501,6 +618,7 @@ def main():
     parser.add_argument('--device', type=str, default='auto', help='Device to use: auto, cpu, cuda, cuda:0, etc.')
     parser.add_argument('--window-size', type=int, default=5, help='PoseMamba temporal window size (must be odd)')
     parser.add_argument('--flip-tta', action='store_true', help='Enable flip test-time augmentation for PoseMamba')
+    parser.add_argument('--show-angle-diff', action='store_true', help='Overlay GT vs prediction angle difference on the frame image')
     parser.add_argument('--disable-triton', action='store_true', help='Disable Triton imports for PoseMamba')
     parser.add_argument('--no-save-images', dest='save_images', action='store_false', help='Do not save comparison images')
     parser.set_defaults(save_images=True)
@@ -529,6 +647,7 @@ def main():
     print(f'Output dir: {args.output_dir}')
     print(f'Window size: {args.window_size}')
     print(f'Flip TTA: {"Enabled" if args.flip_tta else "Disabled"}')
+    print(f'Angle diff overlay: {"Enabled" if args.show_angle_diff else "Disabled"}')
     print(f'Device: {args.device}')
     print('=' * 80)
 

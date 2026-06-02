@@ -45,6 +45,7 @@ from lib.utils.tools import get_config  # noqa: E402
 from lib.utils.utils_data import flip_data  # noqa: E402
 from zReabilitation.comparePose import (  # noqa: E402
     DEFAULT_POSEMAMBA_CHECKPOINT,
+    DEFAULT_POSEMAMBA_CONFIG,
     DEFAULT_YOLO_MODEL_PATH,
     build_window_indices,
     check_gpu_availability,

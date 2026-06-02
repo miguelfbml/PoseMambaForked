@@ -50,7 +50,6 @@ from lib.utils.learning import load_backbone  # noqa: E402
 from lib.utils.tools import get_config  # noqa: E402
 from lib.utils.utils_data import flip_data  # noqa: E402
 from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
-from demo.lib.utils import camera_to_world  # noqa: E402
 
 
 JOINT_NAMES = [
@@ -84,6 +83,7 @@ UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/datas
 DEFAULT_CAMERAS = ['cam0', 'cam1', 'cam2', 'cam3', 'cam4']
 DEFAULT_FOLDERS = list(range(0, 6))
 DEFAULT_SUBFOLDERS = list(range(9, 17))
+DEFAULT_COORD_RANGE = 1000
 
 
 def check_gpu_availability():
@@ -228,17 +228,10 @@ def prepare_pose_for_plot(pose_3d):
         return None
 
     post_out = pose_3d.copy().astype(np.float32)
-    rot = np.array([0.1407056450843811, -0.1500701755285263, -0.755240797996521, 0.6223280429840088], dtype=np.float32)
-    try:
-        post_out = camera_to_world(post_out, R=rot, t=0)
-    except Exception:
-        pass
-
-    post_out[:, 2] -= np.min(post_out[:, 2])
-    max_value = np.max(post_out)
-    if max_value < 1e-6:
-        return post_out
-    return post_out / max_value
+    post_out = apply_upright_correction(post_out)
+    post_out = make_root_relative_3d(post_out)
+    post_out = scale_pose_to_max(post_out)
+    return post_out
 
 
 def plot_3d_skeleton(ax, pose_3d, title, line_color, point_color, missing_text, show_dots=True):
@@ -299,23 +292,9 @@ def render_pose_panel(pose_3d, width, height, sequence_name, frame_idx):
     fig.patch.set_facecolor('white')
     ax.set_facecolor('#fcfcfc')
 
-    if pose_plot is not None:
-        pose_plot = apply_upright_correction(pose_plot)
-        pose_plot = make_root_relative_3d(pose_plot)
-        pose_plot = scale_pose_to_max(pose_plot)
-
-        valid = pose_plot[np.isfinite(pose_plot).all(axis=1)]
-        if valid.size > 0:
-            min_value = np.min(valid, axis=0)
-            max_value = np.max(valid, axis=0)
-            padding = (max_value - min_value) * 0.15
-            min_value -= padding
-            max_value += padding
-            span = np.maximum(max_value - min_value, 1.0)
-            center = pose_plot[14] if pose_plot.shape[0] > 14 else (min_value + max_value) / 2.0
-            ax.set_xlim3d([center[0] - span[0] / 2.0, center[0] + span[0] / 2.0])
-            ax.set_ylim3d([center[1] - span[1] / 2.0, center[1] + span[1] / 2.0])
-            ax.set_zlim3d([center[2] - span[2] / 2.0, center[2] + span[2] / 2.0])
+    ax.set_xlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_ylim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_zlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
 
     plot_3d_skeleton(
         ax,

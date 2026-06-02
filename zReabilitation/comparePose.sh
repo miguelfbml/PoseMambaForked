@@ -10,7 +10,6 @@
 echo "Running UCO PoseMamba sequence rendering"
 echo "Folders: 0-5 | Subfolders: 09-16 | Cameras: cam0-cam4"
 
-ls
 
 export CUDA_LAUNCH_BLOCKING=1
 echo "CUDA_LAUNCH_BLOCKING=$CUDA_LAUNCH_BLOCKING"

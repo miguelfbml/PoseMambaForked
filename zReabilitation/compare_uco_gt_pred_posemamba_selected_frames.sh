@@ -18,7 +18,7 @@ CAMERA="cam0"
 FRAMES=(0 30 60 90 120 150 180 210 240 270)
 
 python3 compare_uco_gt_pred_posemamba_selected_frames.py \
-    --sequence "0/01" \
+    --sequence "0/09" \
     --camera "$CAMERA" \
     --frames "${FRAMES[@]}" \
     --yolo-model "$YOLO_MODEL" \
@@ -30,7 +30,7 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --device "cuda:0"
 
 python3 compare_uco_gt_pred_posemamba_selected_frames.py \
-    --sequence "0/02" \
+    --sequence "0/10" \
     --camera "$CAMERA" \
     --frames "${FRAMES[@]}" \
     --yolo-model "$YOLO_MODEL" \
@@ -42,7 +42,7 @@ python3 compare_uco_gt_pred_posemamba_selected_frames.py \
     --device "cuda:0"
 
 python3 compare_uco_gt_pred_posemamba_selected_frames.py \
-    --sequence "1/01" \
+    --sequence "1/11" \
     --camera "$CAMERA" \
     --frames "${FRAMES[@]}" \
     --yolo-model "$YOLO_MODEL" \

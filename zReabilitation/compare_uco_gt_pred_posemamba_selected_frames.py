@@ -80,6 +80,8 @@ CONNECTIONS_3D = [
 DEFAULT_CAMERAS = ['cam0', 'cam1', 'cam2', 'cam3', 'cam4']
 DEFAULT_GT_3D_FILE = ''
 UCO_DATASET_PATH = '/nas-ctm01/datasets/public/UCO Physical Rehabilitation/dataset/clips_mp4'
+GT_JOINT_NAMES = ['Shoulder', 'Elbow', 'Hand']
+GT_CONNECTIONS_3D = [(0, 1), (1, 2)]
 
 
 def load_posemamba_model(config_path, checkpoint_path, device):
@@ -195,6 +197,18 @@ def load_uco_gt_3d(gt_path, expected_joints=17):
     return np.asarray(poses, dtype=np.float32)
 
 
+def prepare_uco_gt_for_plot(pose_3d):
+    if pose_3d is None:
+        return None
+
+    pose_plot = np.asarray(pose_3d, dtype=np.float32).copy()
+    pose_plot = pose_plot[:3]
+    pose_plot = apply_upright_correction(pose_plot)
+    pose_plot = make_root_relative_3d(pose_plot, root_joint_idx=0)
+    pose_plot = scale_pose_to_max(pose_plot)
+    return pose_plot
+
+
 def render_pose_panel(
     pose_3d,
     width,
@@ -235,6 +249,68 @@ def render_pose_panel(
     return image
 
 
+def render_gt_panel(pose_3d, width, height, sequence_name, frame_idx):
+    pose_plot = prepare_uco_gt_for_plot(pose_3d)
+
+    fig = plt.figure(figsize=(max(width, 1) / 100.0, max(height, 1) / 100.0), dpi=100)
+    ax = fig.add_subplot(111, projection='3d')
+    fig.patch.set_facecolor('white')
+    ax.set_facecolor('#fcfcfc')
+    ax.set_xlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_ylim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+    ax.set_zlim3d([-DEFAULT_COORD_RANGE, DEFAULT_COORD_RANGE])
+
+    ax.set_title('Ground Truth 3D', fontsize=12)
+    ax.set_xlabel('X (right)', fontsize=10)
+    ax.set_ylabel('Y (forward)', fontsize=10)
+    ax.set_zlabel('Z (up)', fontsize=10)
+    ax.view_init(elev=15, azim=45)
+
+    if pose_plot is None or np.allclose(pose_plot, 0.0):
+        ax.text2D(0.10, 0.50, 'No GT Data', transform=ax.transAxes, fontsize=12, color='red')
+    else:
+        for joint1, joint2 in GT_CONNECTIONS_3D:
+            if joint1 < len(pose_plot) and joint2 < len(pose_plot):
+                p1 = pose_plot[joint1]
+                p2 = pose_plot[joint2]
+                ax.plot(
+                    [p1[0], p2[0]],
+                    [p1[1], p2[1]],
+                    [p1[2], p2[2]],
+                    color='royalblue',
+                    linewidth=2.5,
+                    alpha=0.85,
+                )
+
+        xs = pose_plot[:, 0]
+        ys = pose_plot[:, 1]
+        zs = pose_plot[:, 2]
+        ax.scatter(xs, ys, zs, c='deepskyblue', s=45, alpha=0.9, edgecolors='black', linewidth=0.4)
+        ax.scatter(
+            [pose_plot[0, 0]],
+            [pose_plot[0, 1]],
+            [pose_plot[0, 2]],
+            c='green',
+            s=140,
+            marker='*',
+            alpha=1.0,
+            edgecolors='darkgreen',
+            linewidth=1,
+        )
+
+        for joint_idx, (x, y, z) in enumerate(pose_plot):
+            joint_name = GT_JOINT_NAMES[joint_idx] if joint_idx < len(GT_JOINT_NAMES) else f'Joint_{joint_idx}'
+            del joint_name
+            ax.text(x + 18, y + 18, z + 18, f'{joint_idx}', fontsize=8, color='black')
+
+    fig.suptitle(f'{sequence_name} | Frame {frame_idx}', fontsize=12)
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.canvas.draw()
+    image = np.asarray(fig.canvas.buffer_rgba())[:, :, :3].copy()
+    plt.close(fig)
+    return image
+
+
 def compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, frame_idx):
     height, width = frame_bgr.shape[:2]
     output = frame_bgr.copy()
@@ -244,16 +320,12 @@ def compose_left_panel_with_gt_overlay(frame_bgr, gt_pose_3d, sequence_name, fra
     inset_width = min(inset_width, width - 24)
     inset_height = min(inset_height, height - 24)
 
-    inset = render_pose_panel(
+    inset = render_gt_panel(
         gt_pose_3d,
         inset_width,
         inset_height,
         sequence_name,
         frame_idx,
-        panel_title='Ground Truth 3D',
-        line_color='royalblue',
-        point_color='deepskyblue',
-        missing_text='No GT Data',
     )
     inset_bgr = cv2.cvtColor(inset, cv2.COLOR_RGB2BGR)
     inset_bgr = cv2.copyMakeBorder(inset_bgr, 6, 6, 6, 6, cv2.BORDER_CONSTANT, value=(255, 255, 255))

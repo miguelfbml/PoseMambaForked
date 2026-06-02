@@ -51,7 +51,6 @@ from zReabilitation.comparePose import (  # noqa: E402
     load_posemamba_model,
     load_video_frames,
     prepare_pose_for_plot,
-    prepare_uco_gt_for_plot,
     predict_posemamba_window,
 )
 from zReabilitation.compare_gt_yolo_2d import estimate_yolo_poses  # noqa: E402
@@ -153,6 +152,21 @@ def load_uco_gt_3d(gt_path, expected_joints=17):
     if not poses:
         return None
     return np.asarray(poses, dtype=np.float32)
+
+
+def prepare_uco_gt_for_plot(pose_3d):
+    if pose_3d is None:
+        return None
+
+    pose_plot = np.asarray(pose_3d, dtype=np.float32).copy()
+    pose_plot = pose_plot[:3]
+    pose_plot = pose_plot - pose_plot[0:1]
+    pose_plot = pose_plot[:3]
+
+    max_coord = np.max(np.abs(pose_plot))
+    if max_coord < 1e-6:
+        return pose_plot
+    return pose_plot * (900.0 / max_coord)
 
 
 def format_mean(values):
